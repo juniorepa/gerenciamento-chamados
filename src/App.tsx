@@ -10,6 +10,7 @@ import { DashboardScreen } from './components/DashboardScreen';
 import { TicketDetailsScreen } from './components/TicketDetailsScreen';
 import { ResolveScreen } from './components/ResolveScreen';
 import { NewTicketScreen } from './components/NewTicketScreen';
+import { LogisticTicketScreen } from './components/LogisticTicketScreen';
 import { motion, AnimatePresence } from 'motion/react';
 
 function AppContent() {
@@ -27,6 +28,8 @@ function AppContent() {
         return <ResolveScreen key="resolve" />;
       case 'new-ticket':
         return <NewTicketScreen key="new-ticket" />;
+      case 'logistic-ticket':
+        return <LogisticTicketScreen key="logistic-ticket" />;
       default:
         return <LoginScreen key="login" />;
     }
