@@ -69,6 +69,7 @@ export interface User {
   name: string;
   role: string;
   avatarUrl?: string;
+  customerId?: string;
 }
 
 export type ScreenType = 'login' | 'dashboard' | 'ticket-details' | 'resolve' | 'new-ticket';

@@ -1,55 +1,56 @@
-import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Mail, Lock, Eye, EyeOff, LogIn, Ticket, User as UserIcon } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, LogIn, Ticket, AlertCircle } from 'lucide-react';
 import { motion } from 'motion/react';
+import { useState } from 'react';
+import { AuthService } from '../services/authService';
 
 export const LoginScreen: React.FC = () => {
   const { login } = useApp();
-  const [name, setName] = useState('Junior');
   const [email, setEmail] = useState('juniorepa@gmail.com');
   const [password, setPassword] = useState('password123');
   const [showPassword, setShowPassword] = useState(false);
   const [keepLoggedIn, setKeepLoggedIn] = useState(true);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanEmail = email.trim().toLowerCase();
-    const isAdm = cleanEmail === 'adm' || cleanEmail === 'adm@empresa.com';
-
-    if (!isAdm && !name.trim()) {
-      setError('Por favor, preencha seu nome completo.');
-      return;
-    }
-    if (!email) {
-      setError('Por favor, preencha seu endereço de e-mail.');
-      return;
-    }
-    if (!password) {
-      setError('Por favor, preencha sua senha.');
-      return;
-    }
     setError('');
+    setLoading(true);
 
-    // Check if they are trying to log in as ADM
-    if (isAdm) {
-      if (password !== '201515') {
-        setError('Senha incorreta para a conta de Administrador (ADM).');
+    try {
+      // Usar novo AuthService com validações robustas
+      const response = await AuthService.login({
+        email: email.trim().toLowerCase(),
+        password
+      });
+
+      if (!response.success) {
+        setError(response.error?.message || 'Erro ao fazer login');
+        setLoading(false);
         return;
       }
-      // Successful ADM login
-      login('adm@empresa.com', 'ADM');
-    } else {
-      // Normal login with user-provided name
-      login(email, name.trim());
+
+      // Login bem-sucedido
+      if (response.user) {
+        login(response.user.email, response.user.name, {
+          role: response.user.role,
+          customerId: response.user.customerId,
+          id: response.user.id
+        });
+      }
+    } catch (err) {
+      setError('Erro inesperado. Tente novamente.');
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
     <div className="min-h-screen flex flex-col justify-between py-12 px-6 bg-gradient-to-b from-[#f0f4f8] to-[#e1e9f0]">
-      {/* Spacer / Logo Header */}
+      {/* Header */}
       <div className="flex flex-col items-center mt-4">
-        {/* Blue ticket icon card container */}
         <div className="w-16 h-16 bg-[#00236f] rounded-2xl flex items-center justify-center shadow-lg mb-6">
           <Ticket className="w-8 h-8 text-white rotate-[-10deg]" />
         </div>
@@ -62,7 +63,7 @@ export const LoginScreen: React.FC = () => {
         </p>
       </div>
 
-      {/* Main Card Form */}
+      {/* Login Form */}
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -76,128 +77,119 @@ export const LoginScreen: React.FC = () => {
           Por favor, insira suas credenciais para continuar.
         </p>
 
+        {/* Error Message */}
         {error && (
-          <div className="mt-4 p-3 bg-red-50 text-red-700 text-xs rounded-lg font-medium">
-            {error}
-          </div>
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg flex gap-3 items-start"
+          >
+            <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-red-900">{error}</p>
+            </div>
+          </motion.div>
         )}
 
-        <form onSubmit={handleSubmit} className="mt-6 space-y-5">
-          {/* Name input field */}
-          <div>
-            <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2">
-              Nome Completo
-            </label>
-            <div className="relative">
-              <UserIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-              <input
-                id="name-input"
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Ex: Junior"
-                className="w-full h-12 pl-11 pr-4 bg-[#f8fafc] border border-gray-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#00236f] focus:border-transparent focus:bg-white transition-all text-gray-800"
-              />
-            </div>
-          </div>
-
-          {/* Email input field */}
-          <div>
-            <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2">
-              Endereço de E-mail
+        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+          {/* Email Field */}
+          <div className="relative">
+            <label htmlFor="email" className="block text-sm font-semibold text-gray-700 mb-2">
+              Email
             </label>
             <div className="relative">
               <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
               <input
-                id="email-input"
+                id="email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="nome@empresa.com"
-                className="w-full h-12 pl-11 pr-4 bg-[#f8fafc] border border-gray-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#00236f] focus:border-transparent focus:bg-white transition-all text-gray-800"
+                placeholder="seu.email@empresa.com"
+                disabled={loading}
+                className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-500 focus:outline-none focus:bg-white focus:border-[#00236f] transition-all disabled:opacity-50"
               />
             </div>
           </div>
 
-          {/* Password input field */}
-          <div>
-            <div className="flex justify-between items-center mb-2">
-              <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">
-                Senha
-              </label>
-              <button 
-                type="button"
-                className="text-[11px] font-bold text-[#00236f] hover:underline"
-                onClick={() => alert('Para fins de demonstração, qualquer senha é válida.')}
-              >
-                Esqueceu a senha?
-              </button>
-            </div>
+          {/* Password Field */}
+          <div className="relative">
+            <label htmlFor="password" className="block text-sm font-semibold text-gray-700 mb-2">
+              Senha
+            </label>
             <div className="relative">
               <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
               <input
-                id="password-input"
+                id="password"
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full h-12 pl-11 pr-11 bg-[#f8fafc] border border-gray-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#00236f] focus:border-transparent focus:bg-white transition-all tracking-widest text-gray-800"
+                disabled={loading}
+                className="w-full pl-10 pr-10 py-2.5 bg-gray-50 border border-gray-300 rounded-lg text-gray-900 placeholder-gray-500 focus:outline-none focus:bg-white focus:border-[#00236f] transition-all disabled:opacity-50"
               />
               <button
                 type="button"
-                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 focus:outline-none"
                 onClick={() => setShowPassword(!showPassword)}
+                disabled={loading}
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50"
               >
-                {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                {showPassword ? (
+                  <EyeOff className="w-5 h-5" />
+                ) : (
+                  <Eye className="w-5 h-5" />
+                )}
               </button>
             </div>
           </div>
 
-          {/* Keep logged in checkbox */}
-          <div className="flex items-center">
+          {/* Remember Me */}
+          <div className="flex items-center gap-2">
             <input
-              id="keep-logged-in"
               type="checkbox"
+              id="keep-logged-in"
               checked={keepLoggedIn}
               onChange={(e) => setKeepLoggedIn(e.target.checked)}
-              className="w-4.5 h-4.5 text-[#00236f] border-gray-300 rounded focus:ring-[#00236f]"
+              disabled={loading}
+              className="w-4 h-4 rounded border-gray-300 text-[#00236f] focus:ring-0 cursor-pointer disabled:opacity-50"
             />
-            <label htmlFor="keep-logged-in" className="ml-2.5 text-xs text-gray-600 font-medium select-none cursor-pointer">
-              Mantenha-me conectado por 30 dias
+            <label htmlFor="keep-logged-in" className="text-sm text-gray-600 cursor-pointer">
+              Manter-me conectado
             </label>
           </div>
 
-          {/* Sign In Button */}
+          {/* Submit Button */}
           <button
-            id="login-btn"
             type="submit"
-            className="w-full h-12 bg-[#001f66] hover:bg-[#00164e] text-white rounded-xl flex items-center justify-center gap-2 font-semibold text-sm transition-colors shadow-lg shadow-[#001f66]/20 active:scale-[0.98] transform"
+            disabled={loading}
+            className="w-full mt-6 py-2.5 px-4 bg-[#00236f] hover:bg-[#001a52] text-white font-semibold rounded-lg flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Entrar no Painel
-            <LogIn className="w-4 h-4" />
+            {loading ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Entrando...
+              </>
+            ) : (
+              <>
+                <LogIn className="w-4 h-4" />
+                Entrar
+              </>
+            )}
           </button>
         </form>
 
-        <div className="mt-5 p-3.5 bg-blue-50/50 border border-blue-100 rounded-xl text-center">
-          <p className="text-[10px] font-bold text-[#00236f] uppercase tracking-wider mb-1 flex items-center justify-center gap-1">
-            <Lock className="w-3.5 h-3.5 text-[#00236f]" />
-            Chave Administrativa (ADM)
-          </p>
-          <p className="text-xs text-gray-600 leading-normal">
-            Para finalizar chamados, faça login com o e-mail <strong className="text-gray-950 font-black">adm</strong>.
-          </p>
+        {/* Test Credentials Info */}
+        <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <p className="text-xs font-semibold text-blue-900 mb-2">📝 Credenciais de Teste:</p>
+          <div className="space-y-1 text-xs text-blue-800">
+            <p><strong>Admin:</strong> adm@empresa.com / 201515</p>
+            <p><strong>Support:</strong> juniorepa@gmail.com / password123</p>
+          </div>
         </div>
       </motion.div>
 
-      {/* Footer message */}
-      <div className="text-center mt-4 text-xs font-semibold text-gray-500">
-        Não tem uma conta?{' '}
-        <button 
-          onClick={() => alert('Entre em contato com o administrador de TI da sua empresa para criar sua conta de agente.')}
-          className="text-[#00236f] hover:underline"
-        >
-          Entre em contato com o administrador
-        </button>
+      {/* Footer */}
+      <div className="text-center text-xs text-gray-500 font-medium">
+        © 2026 Reliant. Todos os direitos reservados.
       </div>
     </div>
   );
