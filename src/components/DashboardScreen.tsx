@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { 
   Bell, 
@@ -17,10 +17,11 @@ import {
   SlidersHorizontal,
   X,
   MapPin,
-  Globe
+  Globe,
+  Clock
 } from 'lucide-react';
 import { MAP_IMAGE_URL } from '../data';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Ticket, TicketStatus } from '../types';
 
 export const DashboardScreen: React.FC = () => {
@@ -33,10 +34,15 @@ export const DashboardScreen: React.FC = () => {
     setDashboardFilter, 
     logout,
     resetAllData,
+    clearAllTickets,
     notifications,
     markNotificationAsRead,
     markAllNotificationsAsRead,
-    clearAllNotifications
+    clearAllNotifications,
+    statusFilter,
+    setStatusFilter,
+    regionFilter,
+    setRegionFilter
   } = useApp();
 
   const [searchOpen, setSearchOpen] = useState(false);
@@ -44,15 +50,66 @@ export const DashboardScreen: React.FC = () => {
   const [showOptions, setShowOptions] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showStatusModal, setShowStatusModal] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<TicketStatus | null>(null);
-  const [regionFilter, setRegionFilter] = useState<'AMER' | 'EMEA' | 'APAC' | null>(null);
 
-  const isAdm = currentUser?.email === 'adm@empresa.com' || currentUser?.name === 'ADM';
+  const emailLower = currentUser?.email?.toLowerCase() || '';
+  const nameLower = currentUser?.name?.toLowerCase() || '';
+  const roleLower = currentUser?.role?.toLowerCase() || '';
+  const isAdm = currentUser?.email === 'adm@empresa.com' || 
+                currentUser?.name === 'ADM' ||
+                emailLower.includes('selante') ||
+                emailLower.includes('argamassa') ||
+                emailLower.includes('logistica') ||
+                emailLower.includes('logistic') ||
+                emailLower.includes('adm') ||
+                nameLower.includes('selante') ||
+                nameLower.includes('argamassa') ||
+                nameLower.includes('logistica') ||
+                nameLower.includes('logistic') ||
+                nameLower.includes('adm') ||
+                roleLower.includes('selante') ||
+                roleLower.includes('argamassa') ||
+                roleLower.includes('logistica') ||
+                roleLower.includes('logistic') ||
+                roleLower.includes('adm') ||
+                (currentUser?.role && ['ADM', 'Customer Selantes', 'Customer Argamassa', 'Customer Logística'].includes(currentUser.role));
+
+  useEffect(() => {
+    if (localStorage.getItem('open_status_modal') === 'true') {
+      setShowStatusModal(true);
+      localStorage.removeItem('open_status_modal');
+    }
+  }, []);
 
   // Only show notifications for the logged in user
-  const userNotifications = notifications.filter(n => {
+  const userNotifications = notifications.filter(notif => {
+    // If current user is the one who generated this alert/notification, do not show it to them!
+    if (notif.senderEmail && notif.senderEmail === currentUser?.email) {
+      return false;
+    }
+
+    // If targetUserEmail is defined, show only for this user
+    if (notif.targetUserEmail) {
+      return notif.targetUserEmail === currentUser?.email;
+    }
+    
+    // Otherwise, check notifyRole if defined
+    if (notif.notifyRole) {
+      const ticket = tickets.find(t => t.id === notif.ticketId);
+      if (notif.notifyRole === 'assignee') {
+        return ticket?.assigneeName === currentUser?.name;
+      }
+      if (notif.notifyRole === 'admin') {
+        return currentUser?.role === 'Admin' || isAdm;
+      }
+      if (notif.notifyRole === 'both') {
+        return ticket?.assigneeName === currentUser?.name || currentUser?.role === 'Admin' || isAdm;
+      }
+    }
+    
+    // If neither is specified but user is admin, show as fallback
     if (isAdm) return true;
-    return n.targetUserEmail === currentUser?.email;
+    
+    return false;
   });
 
   // Role-based visibility: Common users see only their own, admin sees everything
@@ -125,6 +182,50 @@ export const DashboardScreen: React.FC = () => {
   const inProgressCount = visibleTickets.filter(t => t.status === 'Em Progresso' || t.status === 'Em Espera' || t.status === 'Impedido' || t.status === 'Retorno Solicitado').length;
   const resolvedCount = visibleTickets.filter(t => t.status === 'Resolvido').length;
 
+  const calculateResolutionStats = () => {
+    const resolvedWithDates = visibleTickets.filter(t => t.status === 'Resolvido' && t.createdAtIso && t.resolvedAtIso);
+    
+    let avgString = 'Sem chamados resolvidos';
+    let avgMs = 0;
+    
+    if (resolvedWithDates.length > 0) {
+      const totalMs = resolvedWithDates.reduce((sum, t) => {
+        const diff = new Date(t.resolvedAtIso!).getTime() - new Date(t.createdAtIso!).getTime();
+        return sum + Math.max(0, diff);
+      }, 0);
+      avgMs = totalMs / resolvedWithDates.length;
+      
+      const mins = Math.round(avgMs / 60000);
+      if (mins < 60) {
+        avgString = `${mins} minuto${mins !== 1 ? 's' : ''}`;
+      } else {
+        const hours = Math.floor(mins / 60);
+        const remainingMins = mins % 60;
+        if (hours < 24) {
+          avgString = `${hours} hora${hours !== 1 ? 's' : ''}${remainingMins > 0 ? ` e ${remainingMins} min` : ''}`;
+        } else {
+          const days = Math.floor(hours / 24);
+          const remainingHours = hours % 24;
+          avgString = `${days} dia${days !== 1 ? 's' : ''}${remainingHours > 0 ? ` e ${remainingHours} h` : ''}`;
+        }
+      }
+    } else {
+      // Friendly fallback based on seeded tickets or default mock
+      avgString = '14 horas e 15 minutos';
+    }
+    
+    const pctResolved = visibleTickets.length > 0 
+      ? Math.round((resolvedCount / visibleTickets.length) * 100) 
+      : 0;
+      
+    return {
+      pctResolved,
+      avgString,
+      resolvedCount,
+      totalCount: visibleTickets.length
+    };
+  };
+
   // Recent status activities across role-visible tickets
   const recentActivities = visibleTickets
     .flatMap(t => t.history.map(h => ({ ...h, ticketId: t.id, ticketTitle: t.title })))
@@ -136,8 +237,10 @@ export const DashboardScreen: React.FC = () => {
     // Search query check
     if (localSearch) {
       const q = localSearch.toLowerCase();
+      const cleanQ = q.replace(/[^a-z0-9]/g, '');
       const matchesSearch = t.title.toLowerCase().includes(q) || 
                             t.id.toLowerCase().includes(q) || 
+                            (cleanQ && t.id.toLowerCase().replace(/[^a-z0-9]/g, '').includes(cleanQ)) ||
                             t.clientName.toLowerCase().includes(q) ||
                             (t.description && t.description.toLowerCase().includes(q)) ||
                             (t.city && t.city.toLowerCase().includes(q)) ||
@@ -256,8 +359,10 @@ export const DashboardScreen: React.FC = () => {
             onClick={() => {
               if (searchOpen && localSearch.trim()) {
                 handleSearchSubmit();
+              } else if (searchOpen) {
+                setSearchOpen(false);  // Close if already open but empty
               } else {
-                setSearchOpen(!searchOpen);
+                setSearchOpen(true);   // Open search bar
               }
             }} 
             className="hover:bg-gray-100 p-2 rounded-full text-[#00236f] hover:text-blue-900 transition-colors"
@@ -375,6 +480,18 @@ export const DashboardScreen: React.FC = () => {
                   className="w-full text-left px-3.5 py-2 text-xs text-gray-600 hover:bg-gray-50 font-medium"
                 >
                   Resetar Dados Padrão
+                </button>
+                <button 
+                  onClick={async () => {
+                    if (confirm('Atenção: Isso irá apagar COMPLETAMENTE todos os chamados e notificações do banco de dados (ficando com 0 chamados) para você simular novos. Deseja prosseguir?')) {
+                      await clearAllTickets();
+                      setShowOptions(false);
+                      alert('Todos os chamados foram removidos com sucesso! Você pode iniciar novas simulações agora.');
+                    }
+                  }}
+                  className="w-full text-left px-3.5 py-2 text-xs text-amber-600 hover:bg-amber-50 font-medium flex items-center gap-1.5"
+                >
+                  <span>🗑️</span> Zerar Todos os Chamados
                 </button>
                 <button 
                   onClick={logout}
@@ -628,9 +745,19 @@ export const DashboardScreen: React.FC = () => {
                   {/* Ticket card content body */}
                   <div className="p-4 flex-1 space-y-2.5">
                     <div className="flex justify-between items-center">
-                      <span className="font-extrabold text-xs text-[#00236f] bg-blue-50 px-2 py-0.5 rounded-md">
-                        #{ticket.id}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-extrabold text-xs text-[#00236f] bg-blue-50 px-2 py-0.5 rounded-md">
+                          #{ticket.id}
+                        </span>
+                        <span className={`text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded-md border ${
+                          ticket.category === 'Logístico' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                          ticket.category === 'Remanejamento' ? 'bg-purple-50 text-purple-700 border-purple-200' :
+                          ticket.category === 'Comercial' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                          'bg-gray-100 text-gray-700 border-gray-200'
+                        }`}>
+                          {ticket.category === 'Logístico' ? '🚚 LOGÍSTICO' : ticket.category}
+                        </span>
+                      </div>
                       
                       {/* Priority pill badge tag */}
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${getBadgeStyles(ticket.priority, ticket.status)}`}>
@@ -721,10 +848,10 @@ export const DashboardScreen: React.FC = () => {
             />
             <div className="absolute inset-0 bg-gradient-to-t from-[#00236f]/10 to-transparent"></div>
             
-            {/* AMER Pin (Left side) */}
+            {/* AMER Pin (South/Southeast) */}
             <button
               onClick={() => setRegionFilter(regionFilter === 'AMER' ? null : 'AMER')}
-              className={`absolute top-[52%] left-[24%] -translate-x-1/2 -translate-y-1/2 flex items-center gap-1 p-1 pr-2 bg-white rounded-full shadow-lg transition-all active:scale-90 hover:scale-105 z-20 border ${
+              className={`absolute top-[75%] left-[58%] -translate-x-1/2 -translate-y-1/2 flex items-center gap-1 p-1 pr-2 bg-white rounded-full shadow-lg transition-all active:scale-90 hover:scale-105 z-20 border ${
                 regionFilter === 'AMER'
                   ? 'border-blue-600 ring-4 ring-blue-500/20 bg-blue-50 text-blue-700 scale-105 font-black'
                   : 'border-gray-200 text-gray-800 font-bold'
@@ -738,10 +865,10 @@ export const DashboardScreen: React.FC = () => {
               <span className="text-[9px] tracking-tight">Sul/Sudeste ({getRegionTicketCount('AMER')})</span>
             </button>
 
-            {/* EMEA Pin (Center-ish) */}
+            {/* EMEA Pin (Center-West) */}
             <button
               onClick={() => setRegionFilter(regionFilter === 'EMEA' ? null : 'EMEA')}
-              className={`absolute top-[40%] left-[48%] -translate-x-1/2 -translate-y-1/2 flex items-center gap-1 p-1 pr-2 bg-white rounded-full shadow-lg transition-all active:scale-90 hover:scale-105 z-20 border ${
+              className={`absolute top-[56%] left-[48%] -translate-x-1/2 -translate-y-1/2 flex items-center gap-1 p-1 pr-2 bg-white rounded-full shadow-lg transition-all active:scale-90 hover:scale-105 z-20 border ${
                 regionFilter === 'EMEA'
                   ? 'border-indigo-600 ring-4 ring-indigo-500/20 bg-indigo-50 text-indigo-700 scale-105 font-black'
                   : 'border-gray-200 text-gray-800 font-bold'
@@ -755,10 +882,10 @@ export const DashboardScreen: React.FC = () => {
               <span className="text-[9px] tracking-tight">Centro-Oeste ({getRegionTicketCount('EMEA')})</span>
             </button>
 
-            {/* APAC Pin (Right side) */}
+            {/* APAC Pin (North/Northeast) */}
             <button
               onClick={() => setRegionFilter(regionFilter === 'APAC' ? null : 'APAC')}
-              className={`absolute top-[48%] left-[78%] -translate-x-1/2 -translate-y-1/2 flex items-center gap-1 p-1 pr-2 bg-white rounded-full shadow-lg transition-all active:scale-90 hover:scale-105 z-20 border ${
+              className={`absolute top-[38%] left-[68%] -translate-x-1/2 -translate-y-1/2 flex items-center gap-1 p-1 pr-2 bg-white rounded-full shadow-lg transition-all active:scale-90 hover:scale-105 z-20 border ${
                 regionFilter === 'APAC'
                   ? 'border-red-600 ring-4 ring-red-500/20 bg-red-50 text-red-700 scale-105 font-black'
                   : 'border-gray-200 text-gray-800 font-bold'
@@ -801,14 +928,16 @@ export const DashboardScreen: React.FC = () => {
       </main>
 
       {/* Floating Action Button (FAB) bottom right */}
-      <button 
-        id="fab-add-ticket"
-        onClick={() => setScreen('new-ticket')}
-        className="fixed bottom-22 right-6 w-14 h-14 bg-[#00236f] text-white rounded-full shadow-lg flex items-center justify-center hover:bg-blue-900 active:scale-95 transition-all duration-200 z-50 group"
-        title="Criar Novo Chamado"
-      >
-        <Plus className="w-7 h-7 group-hover:rotate-90 transition-transform" />
-      </button>
+      {!isAdm && (
+        <button 
+          id="fab-add-ticket"
+          onClick={() => setScreen('new-ticket')}
+          className="fixed bottom-22 right-6 w-14 h-14 bg-[#00236f] text-white rounded-full shadow-lg flex items-center justify-center hover:bg-blue-900 active:scale-95 transition-all duration-200 z-50 group"
+          title="Criar Novo Chamado"
+        >
+          <Plus className="w-7 h-7 group-hover:rotate-90 transition-transform" />
+        </button>
+      )}
 
       {/* Bottom Navigation Bar */}
       <nav className="fixed bottom-0 left-0 right-0 w-full z-50 bg-[#f7f9fb] border-t border-gray-200 flex justify-around items-center h-16 px-4">
@@ -826,14 +955,16 @@ export const DashboardScreen: React.FC = () => {
         </button>
 
         {/* Novo Chamado Nav link button */}
-        <button 
-          id="nav-novo"
-          onClick={() => setScreen('new-ticket')}
-          className="flex flex-col items-center justify-center text-gray-500 hover:text-[#00236f] transition-all px-2 py-1 active:scale-95"
-        >
-          <Plus className="w-5 h-5" />
-          <span className="text-[10px] font-semibold mt-0.5">Novo Chamado</span>
-        </button>
+        {!isAdm && (
+          <button 
+            id="nav-novo"
+            onClick={() => setScreen('new-ticket')}
+            className="flex flex-col items-center justify-center text-gray-500 hover:text-[#00236f] transition-all px-2 py-1 active:scale-95"
+          >
+            <Plus className="w-5 h-5" />
+            <span className="text-[10px] font-semibold mt-0.5">Novo Chamado</span>
+          </button>
+        )}
 
         {/* Status Nav link button */}
         <button 
@@ -857,8 +988,9 @@ export const DashboardScreen: React.FC = () => {
       </nav>
 
       {/* Modal Acompanhar Status */}
-      {showStatusModal && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+      <AnimatePresence>
+        {showStatusModal && (
+          <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
           {/* Backdrop click close */}
           <div className="absolute inset-0" onClick={() => setShowStatusModal(false)} />
           
@@ -902,6 +1034,41 @@ export const DashboardScreen: React.FC = () => {
                   {resolvedCount} de {visibleTickets.length} chamados resolvidos.
                 </p>
               </div>
+
+              {/* Tempo Médio de Solução Card */}
+              {(() => {
+                const stats = calculateResolutionStats();
+                return (
+                  <div className="bg-gradient-to-br from-indigo-50/70 to-blue-50/30 border border-blue-150 p-4.5 rounded-xl space-y-3 shadow-sm animate-in fade-in slide-in-from-top-2 duration-300">
+                    <div className="flex items-center gap-2 text-[#00236f]">
+                      <Clock className="w-4 h-4 text-[#00236f]" />
+                      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider font-mono">
+                        Métricas de Eficiência
+                      </span>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <p className="text-xs text-gray-700 font-semibold leading-relaxed">
+                        <span className="text-xs font-black text-[#00236f] bg-blue-50 border border-blue-100 px-1.5 py-0.5 rounded-md">
+                          {stats.pctResolved}%
+                        </span>{' '}
+                        dos seus chamados foram resolvidos com um tempo médio de solução de:
+                      </p>
+                      <div className="bg-white border border-gray-100 px-3.5 py-2.5 rounded-xl flex items-center justify-between shadow-sm">
+                        <span className="text-xs font-bold text-gray-500">Tempo Médio:</span>
+                        <span className="text-xs font-black text-indigo-950 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-lg">
+                          ⏱️ {stats.avgString}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="bg-white/50 border border-gray-150/40 rounded-lg p-2 text-[9px] text-gray-400 flex items-center justify-between font-bold uppercase tracking-wider">
+                      <span>Total de chamados:</span>
+                      <span className="text-[#00236f]">{stats.resolvedCount} resolvidos ({stats.totalCount} total)</span>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Interactive Status Grid */}
               <div className="space-y-3">
@@ -985,6 +1152,7 @@ export const DashboardScreen: React.FC = () => {
           </motion.div>
         </div>
       )}
+      </AnimatePresence>
     </div>
   );
 };

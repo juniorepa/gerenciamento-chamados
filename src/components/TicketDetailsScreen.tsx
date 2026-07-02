@@ -19,7 +19,12 @@ import {
   Eye,
   Camera,
   X,
-  Lock
+  Lock,
+  Droplet,
+  Layers,
+  Truck,
+  MessageSquare,
+  Send
 } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -32,19 +37,52 @@ export const TicketDetailsScreen: React.FC = () => {
     addInternalNote, 
     addAttachment,
     emitTicketAlert,
-    currentUser
+    rateTicket,
+    currentUser,
+    logout
   } = useApp();
 
   const [newNoteText, setNewNoteText] = useState('');
   const [showNoteInput, setShowNoteInput] = useState(false);
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [showMenu, setShowMenu] = useState(false);
+  const [showPhotoSource, setShowPhotoSource] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Local state for the rating form
+  const [selectedRating, setSelectedRating] = useState<'Bom' | 'Ruim' | 'Ótimo' | null>(null);
+  const [ratingComment, setRatingComment] = useState('');
+  const [isSubmittingRating, setIsSubmittingRating] = useState(false);
+
+  // Local state for client return submission
+  const [userResponseText, setUserResponseText] = useState('');
+  const [isSubmittingResponse, setIsSubmittingResponse] = useState(false);
 
   // Find the selected ticket or default to the first one
   const ticket = tickets.find(t => t.id === selectedTicketId) || tickets[0];
 
-  const isAdm = currentUser?.email === 'adm@empresa.com' || currentUser?.name === 'ADM';
+  const emailLower = currentUser?.email?.toLowerCase() || '';
+  const nameLower = currentUser?.name?.toLowerCase() || '';
+  const roleLower = currentUser?.role?.toLowerCase() || '';
+  const isAdm = currentUser?.email === 'adm@empresa.com' || 
+                currentUser?.name === 'ADM' ||
+                emailLower.includes('selante') ||
+                emailLower.includes('argamassa') ||
+                emailLower.includes('logistica') ||
+                emailLower.includes('logistic') ||
+                emailLower.includes('adm') ||
+                nameLower.includes('selante') ||
+                nameLower.includes('argamassa') ||
+                nameLower.includes('logistica') ||
+                nameLower.includes('logistic') ||
+                nameLower.includes('adm') ||
+                roleLower.includes('selante') ||
+                roleLower.includes('argamassa') ||
+                roleLower.includes('logistica') ||
+                roleLower.includes('logistic') ||
+                roleLower.includes('adm') ||
+                (currentUser?.role && ['ADM', 'Customer Selantes', 'Customer Argamassa', 'Customer Logística'].includes(currentUser.role));
 
   if (!ticket) {
     return (
@@ -115,7 +153,18 @@ export const TicketDetailsScreen: React.FC = () => {
   };
 
   const handleAddPhotoClick = () => {
-    fileInputRef.current?.click();
+    setShowPhotoSource(true);
+  };
+
+  const triggerFileInput = (useCamera: boolean) => {
+    if (fileInputRef.current) {
+      if (useCamera) {
+        fileInputRef.current.setAttribute('capture', 'environment');
+      } else {
+        fileInputRef.current.removeAttribute('capture');
+      }
+      fileInputRef.current.click();
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -171,9 +220,52 @@ export const TicketDetailsScreen: React.FC = () => {
               )}
             </button>
           )}
-          <button className="hover:bg-gray-100 p-2 rounded-full text-[#00236f]">
-            <MoreVertical className="w-5 h-5" />
-          </button>
+          <div className="relative">
+            <button 
+              id="more-options-btn"
+              onClick={() => setShowMenu(!showMenu)}
+              className="hover:bg-gray-100 p-2 rounded-full text-[#00236f] active:scale-95 transition-transform"
+              title="Mais Opções"
+            >
+              <MoreVertical className="w-5 h-5" />
+            </button>
+            {showMenu && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowMenu(false)} />
+                <div className="absolute right-0 mt-1.5 w-52 bg-white border border-gray-200 rounded-xl shadow-xl py-1.5 z-50 text-xs text-gray-800 font-medium animate-in fade-in slide-in-from-top-1 duration-150">
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(ticket.id);
+                      setToastMessage(`ID ${ticket.id} copiado para a área de transferência!`);
+                      setShowMenu(false);
+                    }}
+                    className="w-full text-left px-4 py-2 hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                  >
+                    <span>Copiar ID do Chamado</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(window.location.href);
+                      setToastMessage("Link do chamado copiado para a área de transferência!");
+                      setShowMenu(false);
+                    }}
+                    className="w-full text-left px-4 py-2 hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                  >
+                    <span>Compartilhar Chamado</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setScreen('dashboard');
+                      setShowMenu(false);
+                    }}
+                    className="w-full text-left px-4 py-2 hover:bg-gray-50 border-t border-gray-100 flex items-center gap-2 text-[#00236f]"
+                  >
+                    <span>Voltar ao Painel</span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </header>
 
@@ -190,6 +282,18 @@ export const TicketDetailsScreen: React.FC = () => {
               <div className="bg-[#6cf8bb] text-[#00714d] px-3 py-0.5 rounded-full font-bold text-[10px] tracking-wider uppercase">
                 {ticket.status.toUpperCase()}
               </div>
+              {ticket.customerGroup && (
+                <div className={`px-2.5 py-0.5 rounded-full font-bold text-[10px] tracking-wider uppercase flex items-center gap-1 ${
+                  ticket.customerGroup === 'Customer Selantes' ? 'bg-blue-100 text-blue-800' :
+                  ticket.customerGroup === 'Customer Argamassa' ? 'bg-amber-100 text-amber-800' :
+                  'bg-emerald-100 text-emerald-800'
+                }`}>
+                  {ticket.customerGroup === 'Customer Selantes' ? <Droplet className="w-3 h-3 text-blue-600" /> :
+                   ticket.customerGroup === 'Customer Argamassa' ? <Layers className="w-3 h-3 text-amber-600" /> :
+                   <Truck className="w-3 h-3 text-emerald-600" />}
+                  {ticket.customerGroup}
+                </div>
+              )}
             </div>
             <p className="text-[11px] font-semibold text-gray-400">
               Criado em: {ticket.createdAt}
@@ -238,6 +342,22 @@ export const TicketDetailsScreen: React.FC = () => {
                   <span>{ticket.priority}</span>
                 </div>
               </div>
+
+              {ticket.customerGroup && (
+                <div className="pt-2 border-t border-gray-100">
+                  <p className="text-[10px] font-bold text-gray-400 uppercase">Unidade Customer</p>
+                  <p className={`text-xs font-black mt-1 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border ${
+                    ticket.customerGroup === 'Customer Selantes' ? 'bg-blue-50 text-blue-700 border-blue-150' :
+                    ticket.customerGroup === 'Customer Argamassa' ? 'bg-amber-50/70 text-amber-800 border-amber-200' :
+                    'bg-emerald-50/70 text-emerald-850 border-emerald-200'
+                  }`}>
+                    {ticket.customerGroup === 'Customer Selantes' ? <Droplet className="w-3.5 h-3.5 text-blue-600 animate-pulse duration-1000" /> :
+                     ticket.customerGroup === 'Customer Argamassa' ? <Layers className="w-3.5 h-3.5 text-amber-600" /> :
+                     <Truck className="w-3.5 h-3.5 text-emerald-600" />}
+                    {ticket.customerGroup}
+                  </p>
+                </div>
+              )}
 
               {ticket.avgResolutionTime && (
                 <div className="pt-2 border-t border-gray-100">
@@ -289,6 +409,19 @@ export const TicketDetailsScreen: React.FC = () => {
               </div>
             )}
 
+            {/* Custom fields for Logístico */}
+            {ticket.category === 'Logístico' && ticket.logisticSituation && (
+              <div className="mt-4 pt-4 border-t border-gray-100 space-y-3 animate-in fade-in slide-in-from-top-1 duration-150">
+                <h4 className="text-xs font-bold text-[#00236f]">Informações Logísticas</h4>
+                <div>
+                  <span className="text-[10px] font-bold text-gray-400 uppercase block">Situação Ocorrida:</span>
+                  <span className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg font-bold inline-block mt-1">
+                    🚚 {ticket.logisticSituation}
+                  </span>
+                </div>
+              </div>
+            )}
+
             {/* Attachments Section */}
             <div className="mt-4 pt-4 border-t border-gray-100">
               <p className="text-[10px] font-bold text-gray-400 mb-2 uppercase">Anexos ({ticket.attachments.length})</p>
@@ -329,6 +462,186 @@ export const TicketDetailsScreen: React.FC = () => {
               </div>
             </div>
           </div>
+
+          {/* Conditional Reenviar Retorno Section for customers */}
+          {ticket.status === 'Retorno Solicitado' && !isAdm && (
+            <div className="md:col-span-3 bg-gradient-to-br from-indigo-50 to-indigo-100/30 border-2 border-indigo-200 p-5 rounded-2xl shadow-sm space-y-4 animate-in fade-in slide-in-from-top-3 duration-300">
+              <div className="flex items-center gap-2.5 text-indigo-900">
+                <MessageSquare className="w-5 h-5 text-indigo-600 animate-bounce shrink-0" />
+                <h3 className="font-extrabold text-sm tracking-tight text-indigo-900">
+                  Responder Solicitação de Retorno (Reenviar Retorno)
+                </h3>
+              </div>
+              
+              <div className="bg-white p-4 rounded-xl border border-indigo-100 space-y-3">
+                <p className="text-xs text-gray-700 font-medium leading-relaxed">
+                  A equipe de atendimento solicitou informações adicionais para dar andamento ao seu chamado. 
+                  Por favor, responda abaixo informando os detalhes solicitados (como fotos adicionais, número de lote, nota fiscal, etc.).
+                </p>
+
+                <div className="space-y-3">
+                  <div>
+                    <label htmlFor="user-response-text" className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 ml-0.5">
+                      Sua Resposta / Informações Solicitadas
+                    </label>
+                    <textarea
+                      id="user-response-text"
+                      rows={3}
+                      value={userResponseText}
+                      onChange={(e) => setUserResponseText(e.target.value)}
+                      placeholder="Digite aqui as explicações, lotes, NF ou detalhes solicitados..."
+                      className="w-full p-3 text-xs bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:border-transparent transition-all placeholder:text-gray-400 text-gray-800 resize-none font-medium"
+                    />
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-1">
+                    <div className="flex gap-1.5 items-center text-[11px] text-indigo-700/80 font-semibold">
+                      <span>💡</span>
+                      <span>Você pode anexar fotos adicionais usando o botão "Add Foto" na seção de anexos acima.</span>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={isSubmittingResponse}
+                      onClick={() => {
+                        if (!userResponseText.trim()) {
+                          alert('Por favor, escreva as informações solicitadas antes de enviar.');
+                          return;
+                        }
+                        setIsSubmittingResponse(true);
+                        
+                        // Update status to Em Progresso and pass userResponseText as feedback
+                        updateTicketStatus(ticket.id, 'Em Progresso', userResponseText.trim());
+                        
+                        setToastMessage("Seu retorno foi enviado com sucesso! O chamado está em análise.");
+                        setUserResponseText('');
+                        setIsSubmittingResponse(false);
+                      }}
+                      className="w-full sm:w-auto h-10 px-5 bg-indigo-600 hover:bg-indigo-750 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 shrink-0"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      Enviar Retorno e Atualizar Chamado
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Avaliação do Atendimento Card (Shows when resolved or already rated) */}
+          {(ticket.status === 'Resolvido' || ticket.rating) && (
+            <div className="md:col-span-2 bg-gradient-to-br from-[#00236f]/5 to-blue-50/30 border border-[#00236f]/15 p-5 rounded-2xl shadow-sm space-y-4 animate-in fade-in slide-in-from-top-3 duration-300">
+              <div className="flex items-center gap-2 text-[#00236f]">
+                <CheckCircle className="w-4 h-4 text-emerald-600" />
+                <h3 className="font-extrabold text-[11px] tracking-widest uppercase text-[#00236f]">
+                  Avaliação do Atendimento
+                </h3>
+              </div>
+
+              {ticket.rating ? (
+                <div className="bg-white/95 border border-gray-100 p-4 rounded-xl space-y-2.5 shadow-sm">
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-2xl">
+                      {ticket.rating === 'Ótimo' ? '😍' : ticket.rating === 'Bom' ? '👍' : '😞'}
+                    </span>
+                    <div>
+                      <p className="text-xs font-black text-gray-800">
+                        Classificado como <span className={`px-2 py-0.5 rounded-md font-extrabold text-[11px] ml-1 ${
+                          ticket.rating === 'Ótimo' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                          ticket.rating === 'Bom' ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'bg-red-50 text-red-700 border border-red-200'
+                        }`}>{ticket.rating}</span>
+                      </p>
+                      <p className="text-[10px] text-gray-400 font-bold mt-0.5">Obrigado pelo seu feedback!</p>
+                    </div>
+                  </div>
+                  {ticket.ratingComment && (
+                    <div className="bg-gray-50/60 p-2.5 rounded-lg border border-gray-100 mt-2 text-xs text-gray-600 font-medium italic">
+                      "{ticket.ratingComment}"
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <p className="text-xs text-gray-600 font-medium leading-relaxed">
+                    Este chamado foi resolvido! Por favor, dedique alguns segundos para avaliar o nosso atendimento e nos ajudar a melhorar:
+                  </p>
+                  
+                  <div className="grid grid-cols-3 gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedRating('Ruim')}
+                      className={`flex flex-col items-center justify-center p-3 border rounded-xl active:scale-95 transition-all gap-1.5 ${
+                        selectedRating === 'Ruim' 
+                          ? 'bg-red-50 border-red-300 text-red-700 font-bold shadow-sm' 
+                          : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      <span className="text-2xl">😞</span>
+                      <span className="text-[11px] font-bold">Ruim</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setSelectedRating('Bom')}
+                      className={`flex flex-col items-center justify-center p-3 border rounded-xl active:scale-95 transition-all gap-1.5 ${
+                        selectedRating === 'Bom' 
+                          ? 'bg-blue-50 border-blue-300 text-blue-700 font-bold shadow-sm' 
+                          : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      <span className="text-2xl">👍</span>
+                      <span className="text-[11px] font-bold">Bom</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setSelectedRating('Ótimo')}
+                      className={`flex flex-col items-center justify-center p-3 border rounded-xl active:scale-95 transition-all gap-1.5 ${
+                        selectedRating === 'Ótimo' 
+                          ? 'bg-emerald-50 border-emerald-300 text-emerald-700 font-bold shadow-sm' 
+                          : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      <span className="text-2xl">😍</span>
+                      <span className="text-[11px] font-bold">Ótimo</span>
+                    </button>
+                  </div>
+
+                  {selectedRating && (
+                    <div className="space-y-3 animate-in fade-in slide-in-from-top-1 duration-200">
+                      <div>
+                        <label htmlFor="rating-comment" className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1.5 ml-0.5">
+                          Comentário Opcional
+                        </label>
+                        <textarea
+                          id="rating-comment"
+                          rows={2}
+                          value={ratingComment}
+                          onChange={(e) => setRatingComment(e.target.value)}
+                          placeholder="Deixe um comentário sobre o atendimento..."
+                          className="w-full p-3 text-xs bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#00236f] focus:border-transparent transition-all placeholder:text-gray-400 text-gray-800 resize-none"
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsSubmittingRating(true);
+                          rateTicket(ticket.id, selectedRating, ratingComment);
+                          setToastMessage("Muito obrigado pela sua avaliação!");
+                          setIsSubmittingRating(false);
+                        }}
+                        className="w-full h-10 bg-[#00236f] hover:bg-[#0b1d40] text-white rounded-xl text-xs font-bold shadow-sm hover:shadow-md active:scale-[0.98] transition-all flex items-center justify-center gap-1.5"
+                      >
+                        <Check className="w-4 h-4" />
+                        Enviar Avaliação
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Card Column 3: Status History timeline */}
           <div className="md:col-span-2 bg-white border border-gray-150 p-5 rounded-2xl shadow-sm space-y-5">
@@ -518,19 +831,79 @@ export const TicketDetailsScreen: React.FC = () => {
           <History className="w-5 h-5" />
           <span className="text-[10px] font-semibold mt-0.5">Painel</span>
         </button>
-        <button onClick={() => setScreen('new-ticket')} className="flex flex-col items-center justify-center text-[#00236f] active:scale-95">
-          <Plus className="w-5 h-5" />
-          <span className="text-[10px] font-bold mt-0.5">Novo Chamado</span>
-        </button>
-        <button onClick={() => alert('Fila de status atualizada.')} className="flex flex-col items-center justify-center text-gray-500">
+        {!isAdm && (
+          <button onClick={() => setScreen('new-ticket')} className="flex flex-col items-center justify-center text-[#00236f] active:scale-95">
+            <Plus className="w-5 h-5" />
+            <span className="text-[10px] font-bold mt-0.5">Novo Chamado</span>
+          </button>
+        )}
+        <button 
+          onClick={() => {
+            localStorage.setItem('open_status_modal', 'true');
+            setScreen('dashboard');
+          }} 
+          className="flex flex-col items-center justify-center text-gray-500 hover:text-[#00236f] transition-colors"
+          title="Ver Status dos Chamados"
+        >
           <History className="w-5 h-5 rotate-180" />
           <span className="text-[10px] font-semibold mt-0.5">Status</span>
         </button>
-        <button onClick={() => setScreen('login')} className="flex flex-col items-center justify-center text-gray-500">
+        <button 
+          onClick={logout} 
+          className="flex flex-col items-center justify-center text-gray-500 hover:text-red-600 transition-colors"
+          title="Sair da Conta"
+        >
           <StickyNote className="w-5 h-5" />
           <span className="text-[10px] font-semibold mt-0.5">Sair</span>
         </button>
       </nav>
+
+      {/* Origin/Source Selection Modal */}
+      {showPhotoSource && (
+        <div className="fixed inset-0 bg-black/60 z-55 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="absolute inset-0" onClick={() => setShowPhotoSource(false)} />
+          <motion.div 
+            initial={{ opacity: 0, y: 100 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="relative w-full sm:max-w-sm bg-white rounded-t-3xl sm:rounded-2xl p-6 shadow-2xl z-10 space-y-4"
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+              <h3 className="font-extrabold text-xs text-gray-400 uppercase tracking-wider">Origem do Anexo</h3>
+              <button onClick={() => setShowPhotoSource(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPhotoSource(false);
+                  triggerFileInput(true);
+                }}
+                className="flex flex-col items-center justify-center p-5 border border-gray-150 rounded-xl hover:bg-blue-50/20 active:scale-95 transition-all gap-2 text-[#00236f]"
+              >
+                <div className="bg-blue-50 p-3 rounded-full">
+                  <Camera className="w-6 h-6 text-[#00236f]" />
+                </div>
+                <span className="text-xs font-bold">Usar Câmera</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPhotoSource(false);
+                  triggerFileInput(false);
+                }}
+                className="flex flex-col items-center justify-center p-5 border border-gray-150 rounded-xl hover:bg-blue-50/20 active:scale-95 transition-all gap-2 text-[#00236f]"
+              >
+                <div className="bg-blue-50 p-3 rounded-full">
+                  <Plus className="w-6 h-6 text-[#00236f]" />
+                </div>
+                <span className="text-xs font-bold">Galeria/Arquivos</span>
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 };

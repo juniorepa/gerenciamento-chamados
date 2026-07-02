@@ -1,6 +1,6 @@
 import { Ticket, User } from './types';
 
-export const MAP_IMAGE_URL = 'https://lh3.googleusercontent.com/aida-public/AB6AXuA_0kWSjX3QhthPcULj5Wfb6Yy1EN-BeIH3UuAhk7WqumMYnyfUPEjqnCyysb68y3YHQiG637psdsjo-XILASshhn6ZiQqlueQ2hS8-gOMpiwTvUydcXKifyw3K3CZV72vZ5qGbnlpka6RUp5Azo70-42ZeHCnMNkEFZ5N9n-TJwcX9CgoyytcgbYPeeog4BGxtOJdRcPErLu-Dw24BcK20uPj3aoU4mCRu_sSlm2PVrcqQkSye6U8GHfwkD9VuDhuAVlSXFjatvpEm';
+export const MAP_IMAGE_URL = '/src/assets/images/brazil_map_1782669740307.jpg';
 
 export const DEFAULT_USER: User = {
   email: 'juniorepa@gmail.com',
@@ -17,6 +17,7 @@ export const INITIAL_TICKETS: Ticket[] = [
     status: 'Em Progresso',
     priority: 'P1 - Crítica',
     category: 'ADM',
+    customerGroup: 'Customer Selantes',
     clientName: 'Global Logistics Corp',
     contactPerson: 'Sarah Jenkins',
     contactEmail: 's.jenkins@globallogistics.com',
@@ -79,6 +80,7 @@ export const INITIAL_TICKETS: Ticket[] = [
     status: 'Em Progresso',
     priority: 'Crítico',
     category: 'ADM',
+    customerGroup: 'Customer Selantes',
     clientName: 'Global Logistics Corp.',
     createdAt: '25 Out, 2023 · 08:30 AM',
     updatedAt: 'Atualizado há 2h',
@@ -113,6 +115,7 @@ export const INITIAL_TICKETS: Ticket[] = [
     status: 'Aberto',
     priority: 'Média',
     category: 'Comercial',
+    customerGroup: 'Customer Argamassa',
     clientName: 'Fintech Solutions Ltd',
     createdAt: '25 Out, 2023 · 10:15 AM',
     updatedAt: 'Atualizado há 5h',
@@ -140,6 +143,7 @@ export const INITIAL_TICKETS: Ticket[] = [
     status: 'Em Espera',
     priority: 'Baixa',
     category: 'Comercial',
+    customerGroup: 'Customer Logística',
     clientName: 'SecureData Systems',
     createdAt: '24 Out, 2023 · 02:00 PM',
     updatedAt: 'Atualizado há 1 dia',
@@ -166,6 +170,84 @@ export const INITIAL_TICKETS: Ticket[] = [
     city: 'Recife',
     state: 'PE',
     createdBy: 'juniorepa@gmail.com'
+  },
+  {
+    id: 'APP0005/2026',
+    title: 'Ajuste Cadastral Comercial - Matriz SP',
+    description: 'Solicitação de alteração cadastral comercial para a matriz do cliente Varejo S/A de forma a regularizar o faturamento e contratos adicionais.',
+    status: 'Resolvido',
+    priority: 'Média',
+    category: 'Comercial',
+    customerGroup: 'Customer Argamassa',
+    clientName: 'Varejo S/A',
+    createdAt: '28 Jun, 2026 · 09:00 AM',
+    updatedAt: 'Resolvido há 2 dias',
+    assigneeInitials: 'JD',
+    assigneeName: 'Jane Doe',
+    attachments: [],
+    history: [
+      {
+        id: 'hist-0005-1',
+        title: 'Chamado Resolvido',
+        description: 'Cadastro atualizado e contrato regularizado no sistema principal',
+        timestamp: '28 Jun, 2026 · 11:30 AM',
+        completed: true
+      },
+      {
+        id: 'hist-0005-2',
+        title: 'Chamado Aberto',
+        description: 'Recebido via portal de faturamento',
+        timestamp: '28 Jun, 2026 · 09:00 AM',
+        completed: true
+      }
+    ],
+    internalNotes: [],
+    city: 'São Paulo',
+    state: 'SP',
+    createdBy: 'juniorepa@gmail.com',
+    createdAtIso: '2026-06-28T16:00:00.000Z',
+    resolvedAtIso: '2026-06-28T18:30:00.000Z',
+    rating: 'Ótimo',
+    ratingComment: 'Excelente atendimento, rápido e proativo!'
+  },
+  {
+    id: 'APP0006/2026',
+    title: 'Divergência de Faturamento Q2',
+    description: 'Ajuste de notas fiscais relativas ao segundo trimestre para fins tributários e auditoria contábil.',
+    status: 'Resolvido',
+    priority: 'Baixa',
+    category: 'ADM',
+    customerGroup: 'Customer Logística',
+    clientName: 'Tech Solutions',
+    createdAt: '25 Jun, 2026 · 02:00 PM',
+    updatedAt: 'Resolvido há 5 dias',
+    assigneeInitials: 'AD',
+    assigneeName: 'ADM',
+    attachments: [],
+    history: [
+      {
+        id: 'hist-0006-1',
+        title: 'Chamado Resolvido',
+        description: 'Valores conciliados e guia de impostos corrigida',
+        timestamp: '26 Jun, 2026 · 02:00 PM',
+        completed: true
+      },
+      {
+        id: 'hist-0006-2',
+        title: 'Chamado Aberto',
+        description: 'Criado pelo gestor financeiro',
+        timestamp: '25 Jun, 2026 · 02:00 PM',
+        completed: true
+      }
+    ],
+    internalNotes: [],
+    city: 'Curitiba',
+    state: 'PR',
+    createdBy: 'fintech@solutions.com',
+    createdAtIso: '2026-06-25T21:00:00.000Z',
+    resolvedAtIso: '2026-06-26T21:00:00.000Z',
+    rating: 'Bom',
+    ratingComment: 'Resolvido dentro do prazo acordado.'
   }
 ];
 

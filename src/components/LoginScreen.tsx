@@ -1,27 +1,29 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Mail, Lock, Eye, EyeOff, LogIn, Ticket, User as UserIcon } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, LogIn, Ticket, User as UserIcon, UserPlus } from 'lucide-react';
 import { motion } from 'motion/react';
 
 export const LoginScreen: React.FC = () => {
-  const { login } = useApp();
-  const [name, setName] = useState('Junior');
-  const [email, setEmail] = useState('juniorepa@gmail.com');
-  const [password, setPassword] = useState('password123');
+  const { loginWithSupabase, signUpWithSupabase, setScreen } = useApp();
+  const [isRegister, setIsRegister] = useState(false);
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [keepLoggedIn, setKeepLoggedIn] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanEmail = email.trim().toLowerCase();
-    const isAdm = cleanEmail === 'adm' || cleanEmail === 'adm@empresa.com';
+    const cleanEmail = email.trim();
 
-    if (!isAdm && !name.trim()) {
+    if (!name.trim()) {
       setError('Por favor, preencha seu nome completo.');
       return;
     }
-    if (!email) {
+    if (!cleanEmail) {
       setError('Por favor, preencha seu endereço de e-mail.');
       return;
     }
@@ -29,19 +31,38 @@ export const LoginScreen: React.FC = () => {
       setError('Por favor, preencha sua senha.');
       return;
     }
-    setError('');
 
-    // Check if they are trying to log in as ADM
-    if (isAdm) {
-      if (password !== '201515') {
-        setError('Senha incorreta para a conta de Administrador (ADM).');
-        return;
+    setError('');
+    setSuccess('');
+    setLoading(true);
+
+    if (isRegister) {
+      // Supabase Sign Up
+      const { error: signUpErr } = await signUpWithSupabase(cleanEmail, password, name.trim());
+      if (signUpErr) {
+        setError(signUpErr);
+        setLoading(false);
+      } else {
+        setSuccess('Sua conta foi criada com sucesso! Faça login abaixo para entrar.');
+        setIsRegister(false);
+        setLoading(false);
       }
-      // Successful ADM login
-      login('adm@empresa.com', 'ADM');
     } else {
-      // Normal login with user-provided name
-      login(email, name.trim());
+      // Supabase Sign In
+      const { error: signInErr } = await loginWithSupabase(cleanEmail, password, name.trim());
+      if (signInErr) {
+        if (signInErr === 'usuário nao cadastrado') {
+          setName('');
+          setEmail('');
+          setPassword('');
+          setError('usuário nao cadastrado');
+        } else {
+          setError(signInErr);
+        }
+        setLoading(false);
+      } else {
+        setLoading(false);
+      }
     }
   };
 
@@ -58,7 +79,7 @@ export const LoginScreen: React.FC = () => {
           Gerenciamento de Chamados
         </h1>
         <p className="text-sm text-gray-500 font-medium mt-1.5 text-center">
-          Fluxo de pós-venda de nível empresarial
+          Fluxo de pós-venda com Autenticação Supabase
         </p>
       </div>
 
@@ -69,24 +90,68 @@ export const LoginScreen: React.FC = () => {
         transition={{ duration: 0.4, ease: 'easeOut' }}
         className="w-full max-w-md mx-auto my-8 bg-white border border-gray-100 rounded-[24px] p-8 shadow-xl shadow-[#00236f]/5"
       >
-        <h2 className="text-2xl font-bold text-gray-900 leading-tight">
-          Bem-vindo de volta
+        <h2 className="text-2xl font-bold text-gray-900 leading-tight mb-2">
+          {isRegister ? 'Criar nova conta' : 'Bem-vindo de volta'}
         </h2>
-        <p className="text-sm text-gray-500 mt-2 font-normal">
-          Por favor, insira suas credenciais para continuar.
+        <p className="text-sm text-gray-500 mb-6 font-normal">
+          {isRegister 
+            ? 'Preencha os campos abaixo para registrar um novo agente de suporte.'
+            : 'Por favor, insira suas credenciais para acessar o painel.'}
         </p>
 
+        {/* Tab Selector */}
+        <div className="flex border-b border-gray-100 mb-6">
+          <button
+            id="tab-login"
+            type="button"
+            className={`flex-1 pb-3 text-sm font-semibold border-b-2 transition-all ${
+              !isRegister
+                ? 'border-[#00236f] text-[#00236f]'
+                : 'border-transparent text-gray-400 hover:text-gray-600'
+            }`}
+            onClick={() => {
+              setIsRegister(false);
+              setError('');
+              setSuccess('');
+            }}
+          >
+            Entrar
+          </button>
+          <button
+            id="tab-register"
+            type="button"
+            className={`flex-1 pb-3 text-sm font-semibold border-b-2 transition-all ${
+              isRegister
+                ? 'border-[#00236f] text-[#00236f]'
+                : 'border-transparent text-gray-400 hover:text-gray-600'
+            }`}
+            onClick={() => {
+              setIsRegister(true);
+              setError('');
+              setSuccess('');
+            }}
+          >
+            Criar Conta
+          </button>
+        </div>
+
         {error && (
-          <div className="mt-4 p-3 bg-red-50 text-red-700 text-xs rounded-lg font-medium">
+          <div className="p-3 bg-red-50 text-red-700 text-xs rounded-lg font-medium mb-4">
             {error}
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="mt-6 space-y-5">
+        {success && (
+          <div className="p-3 bg-green-50 text-green-700 text-xs rounded-lg font-medium mb-4">
+            {success}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-5">
           {/* Name input field */}
           <div>
             <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2">
-              Nome Completo
+              Seu Nome / Nome Completo
             </label>
             <div className="relative">
               <UserIcon className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -97,6 +162,7 @@ export const LoginScreen: React.FC = () => {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Ex: Junior"
                 className="w-full h-12 pl-11 pr-4 bg-[#f8fafc] border border-gray-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#00236f] focus:border-transparent focus:bg-white transition-all text-gray-800"
+                required
               />
             </div>
           </div>
@@ -115,6 +181,7 @@ export const LoginScreen: React.FC = () => {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="nome@empresa.com"
                 className="w-full h-12 pl-11 pr-4 bg-[#f8fafc] border border-gray-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#00236f] focus:border-transparent focus:bg-white transition-all text-gray-800"
+                required
               />
             </div>
           </div>
@@ -125,13 +192,20 @@ export const LoginScreen: React.FC = () => {
               <label className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">
                 Senha
               </label>
-              <button 
-                type="button"
-                className="text-[11px] font-bold text-[#00236f] hover:underline"
-                onClick={() => alert('Para fins de demonstração, qualquer senha é válida.')}
-              >
-                Esqueceu a senha?
-              </button>
+              {!isRegister && (
+                <button 
+                  type="button"
+                  className="text-[11px] font-bold text-[#00236f] hover:underline"
+                  onClick={() => {
+                    if (email.trim()) {
+                      localStorage.setItem('reset_email_preset', email.trim());
+                    }
+                    setScreen('reset-password');
+                  }}
+                >
+                  Esqueceu a senha?
+                </button>
+              )}
             </div>
             <div className="relative">
               <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
@@ -142,6 +216,7 @@ export const LoginScreen: React.FC = () => {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 className="w-full h-12 pl-11 pr-11 bg-[#f8fafc] border border-gray-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#00236f] focus:border-transparent focus:bg-white transition-all tracking-widest text-gray-800"
+                required
               />
               <button
                 type="button"
@@ -154,50 +229,48 @@ export const LoginScreen: React.FC = () => {
           </div>
 
           {/* Keep logged in checkbox */}
-          <div className="flex items-center">
-            <input
-              id="keep-logged-in"
-              type="checkbox"
-              checked={keepLoggedIn}
-              onChange={(e) => setKeepLoggedIn(e.target.checked)}
-              className="w-4.5 h-4.5 text-[#00236f] border-gray-300 rounded focus:ring-[#00236f]"
-            />
-            <label htmlFor="keep-logged-in" className="ml-2.5 text-xs text-gray-600 font-medium select-none cursor-pointer">
-              Mantenha-me conectado por 30 dias
-            </label>
-          </div>
+          {!isRegister && (
+            <div className="flex items-center">
+              <input
+                id="keep-logged-in"
+                type="checkbox"
+                checked={keepLoggedIn}
+                onChange={(e) => setKeepLoggedIn(e.target.checked)}
+                className="w-4.5 h-4.5 text-[#00236f] border-gray-300 rounded focus:ring-[#00236f]"
+              />
+              <label htmlFor="keep-logged-in" className="ml-2.5 text-xs text-gray-600 font-medium select-none cursor-pointer">
+                Mantenha-me conectado
+              </label>
+            </div>
+          )}
 
-          {/* Sign In Button */}
+          {/* Action Button */}
           <button
             id="login-btn"
             type="submit"
-            className="w-full h-12 bg-[#001f66] hover:bg-[#00164e] text-white rounded-xl flex items-center justify-center gap-2 font-semibold text-sm transition-colors shadow-lg shadow-[#001f66]/20 active:scale-[0.98] transform"
+            disabled={loading}
+            className={`w-full h-12 bg-[#001f66] hover:bg-[#00164e] text-white rounded-xl flex items-center justify-center gap-2 font-semibold text-sm transition-colors shadow-lg shadow-[#001f66]/20 active:scale-[0.98] transform ${loading ? 'opacity-85 cursor-not-allowed' : ''}`}
           >
-            Entrar no Painel
-            <LogIn className="w-4 h-4" />
+            {loading ? (
+              <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+            ) : isRegister ? (
+              <>
+                Registrar Agente
+                <UserPlus className="w-4 h-4" />
+              </>
+            ) : (
+              <>
+                Entrar no Painel
+                <LogIn className="w-4 h-4" />
+              </>
+            )}
           </button>
         </form>
-
-        <div className="mt-5 p-3.5 bg-blue-50/50 border border-blue-100 rounded-xl text-center">
-          <p className="text-[10px] font-bold text-[#00236f] uppercase tracking-wider mb-1 flex items-center justify-center gap-1">
-            <Lock className="w-3.5 h-3.5 text-[#00236f]" />
-            Chave Administrativa (ADM)
-          </p>
-          <p className="text-xs text-gray-600 leading-normal">
-            Para finalizar chamados, faça login com o e-mail <strong className="text-gray-950 font-black">adm</strong>.
-          </p>
-        </div>
       </motion.div>
 
       {/* Footer message */}
       <div className="text-center mt-4 text-xs font-semibold text-gray-500">
-        Não tem uma conta?{' '}
-        <button 
-          onClick={() => alert('Entre em contato com o administrador de TI da sua empresa para criar sua conta de agente.')}
-          className="text-[#00236f] hover:underline"
-        >
-          Entre em contato com o administrador
-        </button>
+        Desenvolvido com integração em tempo real via Supabase.
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 export type TicketStatus = 'Aberto' | 'Em Progresso' | 'Em Espera' | 'Impedido' | 'Resolvido' | 'Retorno Solicitado';
 export type TicketPriority = 'Baixa' | 'Média' | 'Alta' | 'Crítico' | 'P1 - Crítica';
-export type TicketCategory = 'ADM' | 'Comercial' | 'Remanejamento';
+export type TicketCategory = 'ADM' | 'Comercial' | 'Remanejamento' | 'Logístico';
 
 export interface StatusHistoryEntry {
   id: string;
@@ -30,6 +30,7 @@ export interface Ticket {
   status: TicketStatus;
   priority: TicketPriority;
   category: TicketCategory;
+  customerGroup?: 'Customer Selantes' | 'Customer Argamassa' | 'Customer Logística'; // Unidade/Customer de destino
   clientName: string;
   contactPerson?: string;
   contactEmail?: string;
@@ -47,11 +48,18 @@ export interface Ticket {
   customerReason?: string;
   vendasNumber?: string;
   transferReason?: string;
+  logisticSituation?: string; // Situação logística (Ex: Atraso entrega, Avaria, etc.)
 
   // Regional and ownership fields
   city?: string;
   state?: string;
   createdBy?: string;
+  notifyOnReturn?: boolean; // Se deve notificar ao enviar resposta
+  lastRespondedBy?: string; // Quem respondeu por último
+  createdAtIso?: string; // ISO string de criação do ticket
+  resolvedAtIso?: string; // ISO string de resolução do ticket
+  rating?: 'Bom' | 'Ruim' | 'Ótimo'; // Avaliação do atendimento
+  ratingComment?: string; // Comentário da avaliação
 }
 
 export interface AppNotification {
@@ -62,6 +70,8 @@ export interface AppNotification {
   read: boolean;
   ticketId: string;
   targetUserEmail?: string;
+  notifyRole?: 'admin' | 'assignee' | 'both'; // Novo campo
+  senderEmail?: string; // Quem gerou o alerta
 }
 
 export interface User {
@@ -71,4 +81,4 @@ export interface User {
   avatarUrl?: string;
 }
 
-export type ScreenType = 'login' | 'dashboard' | 'ticket-details' | 'resolve' | 'new-ticket';
+export type ScreenType = 'login' | 'dashboard' | 'ticket-details' | 'resolve' | 'new-ticket' | 'reset-password';

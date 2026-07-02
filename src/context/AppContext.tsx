@@ -1,8 +1,28 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Ticket, TicketStatus, TicketCategory, TicketPriority, ScreenType, User, Attachment, StatusHistoryEntry, InternalNote, AppNotification } from '../types';
 import { loadTickets, saveTickets, DEFAULT_USER, INITIAL_TICKETS } from '../data';
-import { db } from '../lib/firebase';
-import { collection, doc, setDoc, onSnapshot, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { supabase } from '../lib/supabase';
+
+const INITIAL_NOTIFICATIONS = [
+  {
+    id: 'not-1',
+    title: '⚠️ Alerta Regional Crítico',
+    description: 'Chamado da sua região atingindo SLA crítico de 4 horas.',
+    time: 'Agora',
+    read: false,
+    ticketId: 'APP0002/2026',
+    targetUserEmail: 'juniorepa@gmail.com'
+  },
+  {
+    id: 'not-2',
+    title: '🔧 Novo Chamado Atribuído',
+    description: 'Você recebeu atribuição técnica para um chamado recém-aberto.',
+    time: 'Há 12m',
+    read: false,
+    ticketId: 'APP0001/2026',
+    targetUserEmail: 'juniorepa@gmail.com'
+  }
+];
 
 interface AppContextType {
   currentUser: User | null;
@@ -11,8 +31,15 @@ interface AppContextType {
   selectedTicketId: string | null;
   dashboardFilter: 'Todos' | 'Atribuídos' | 'Escalados';
   searchQuery: string;
+  statusFilter: TicketStatus | null;
+  setStatusFilter: (status: TicketStatus | null) => void;
+  regionFilter: 'AMER' | 'EMEA' | 'APAC' | null;
+  setRegionFilter: (region: 'AMER' | 'EMEA' | 'APAC' | null) => void;
   login: (email: string, name: string) => void;
   logout: () => void;
+  loginWithSupabase: (email: string, password: string, name?: string) => Promise<{ error: any }>;
+  signUpWithSupabase: (email: string, password: string, name: string) => Promise<{ error: any }>;
+  resetPasswordWithSupabase: (email: string, password?: string) => Promise<{ error: any }>;
   setScreen: (screen: ScreenType) => void;
   selectTicket: (id: string | null) => void;
   setDashboardFilter: (filter: 'Todos' | 'Atribuídos' | 'Escalados') => void;
@@ -30,6 +57,7 @@ interface AppContextType {
     attachments?: Attachment[];
     city?: string;
     state?: string;
+    customerGroup?: 'Customer Selantes' | 'Customer Argamassa' | 'Customer Logística';
   }) => Ticket;
   updateTicketStatus: (
     id: string,
@@ -41,7 +69,9 @@ interface AppContextType {
   addInternalNote: (ticketId: string, text: string) => void;
   addAttachment: (ticketId: string, name: string, url: string) => void;
   emitTicketAlert: (ticketId: string, alertTitle: string, alertDescription: string) => void;
+  rateTicket: (ticketId: string, rating: 'Bom' | 'Ruim' | 'Ótimo', comment?: string) => void;
   resetAllData: () => void;
+  clearAllTickets: () => Promise<void>;
   notifications: AppNotification[];
   markNotificationAsRead: (id: string) => void;
   markAllNotificationsAsRead: () => void;
@@ -60,167 +90,436 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return null;
       }
     }
-    // Default to mock logged in to match the dashboard image directly
-    return DEFAULT_USER;
+    return null; // Start as null to prompt Supabase/local login on first use
   });
 
   const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [activeScreen, setActiveScreen] = useState<ScreenType>('login'); // Start at login to let user log in, or we can check if they're already logged in
-  const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null);
-  const [dashboardFilter, setDashboardFilter] = useState<'Todos' | 'Atribuídos' | 'Escalados'>('Todos');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  
+  const [activeScreen, setActiveScreen] = useState<ScreenType>(() => {
+    const storedUser = localStorage.getItem('reliant_user');
+    if (!storedUser) return 'login';
+    const storedScreen = localStorage.getItem('reliant_active_screen');
+    return (storedScreen as ScreenType) || 'dashboard';
+  });
 
-  // 1. Subscribe to real-time tickets from Firestore
+  const [selectedTicketId, setSelectedTicketId] = useState<string | null>(() => {
+    return localStorage.getItem('reliant_selected_ticket_id') || null;
+  });
+
+  // Sync activeScreen to localStorage
   useEffect(() => {
-    const unsubscribeTickets = onSnapshot(collection(db, 'tickets'), (snapshot) => {
-      const ticketsList: Ticket[] = [];
-      snapshot.forEach((docSnap) => {
-        ticketsList.push(docSnap.data() as Ticket);
-      });
+    if (activeScreen) {
+      localStorage.setItem('reliant_active_screen', activeScreen);
+    } else {
+      localStorage.removeItem('reliant_active_screen');
+    }
+  }, [activeScreen]);
 
-      if (ticketsList.length === 0) {
-        // If Firestore is empty, seed it with INITIAL_TICKETS
-        const batch = writeBatch(db);
-        INITIAL_TICKETS.forEach((ticket) => {
-          const ticketRef = doc(db, 'tickets', ticket.id.replace('/', '-'));
-          batch.set(ticketRef, ticket);
-        });
-        batch.commit()
-          .then(() => console.log('Database seeded with initial tickets successfully.'))
-          .catch((err) => console.error('Error seeding initial tickets:', err));
-        
-        setTickets(INITIAL_TICKETS);
-        saveTickets(INITIAL_TICKETS);
-      } else {
-        // Sort tickets by ID descending (newer IDs at top)
-        ticketsList.sort((a, b) => b.id.localeCompare(a.id));
-        setTickets(ticketsList);
-        saveTickets(ticketsList);
-      }
-    }, (error) => {
-      console.error("Error fetching tickets from Firestore:", error);
-      // Fallback to local storage if Firestore fails
-      const loaded = loadTickets();
-      setTickets(loaded);
-    });
-
-    return () => unsubscribeTickets();
-  }, []);
-
-  // 2. Subscribe to real-time notifications from Firestore
+  // Sync selectedTicketId to localStorage
   useEffect(() => {
-    const unsubscribeNotifs = onSnapshot(collection(db, 'notifications'), (snapshot) => {
-      const notifsList: AppNotification[] = [];
-      snapshot.forEach((docSnap) => {
-        notifsList.push(docSnap.data() as AppNotification);
-      });
+    if (selectedTicketId) {
+      localStorage.setItem('reliant_selected_ticket_id', selectedTicketId);
+    } else {
+      localStorage.removeItem('reliant_selected_ticket_id');
+    }
+  }, [selectedTicketId]);
 
-      if (notifsList.length === 0) {
-        // Seed initial notifications if Firestore is empty
-        const initial = [
-          {
-            id: 'not-1',
-            title: '⚠️ Alerta Regional Crítico',
-            description: 'Chamado da sua região atingindo SLA crítico de 4 horas.',
-            time: 'Agora',
-            read: false,
-            ticketId: 'APP0002/2026',
-            targetUserEmail: 'juniorepa@gmail.com'
-          },
-          {
-            id: 'not-2',
-            title: '🔧 Novo Chamado Atribuído',
-            description: 'Você recebeu atribuição técnica para um chamado recém-aberto.',
-            time: 'Há 12m',
-            read: false,
-            ticketId: 'APP0001/2026',
-            targetUserEmail: 'juniorepa@gmail.com'
-          }
-        ];
-        const batch = writeBatch(db);
-        initial.forEach((notif) => {
-          const notifRef = doc(db, 'notifications', notif.id);
-          batch.set(notifRef, notif);
-        });
-        batch.commit()
-          .then(() => console.log('Database seeded with initial notifications successfully.'))
-          .catch((err) => console.error('Error seeding notifications:', err));
+  // Effect to sync and listen to Supabase Authentication State
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          const userEmail = session.user.email || '';
+          const name = session.user.user_metadata?.name || session.user.user_metadata?.full_name || userEmail.split('@')[0];
+          const emailLower = userEmail.toLowerCase().trim();
+          const nameLower = name.toLowerCase().trim();
+          const isAdm = emailLower === 'adm@empresa.com' || 
+                        emailLower.startsWith('adm@') || 
+                        emailLower.includes('selante') || 
+                        emailLower.includes('argamassa') || 
+                        emailLower.includes('logistica') || 
+                        emailLower.includes('logistic') ||
+                        nameLower.includes('selante') ||
+                        nameLower.includes('argamassa') ||
+                        nameLower.includes('logistica') ||
+                        nameLower.includes('logistic') ||
+                        nameLower.includes('adm');
 
-        setNotifications(initial);
-        localStorage.setItem('reliant_notifications', JSON.stringify(initial));
-      } else {
-        // Sort notifications by id descending
-        notifsList.sort((a, b) => b.id.localeCompare(a.id));
-        setNotifications(notifsList);
-        localStorage.setItem('reliant_notifications', JSON.stringify(notifsList));
-      }
-    }, (error) => {
-      console.error("Error fetching notifications:", error);
-      const stored = localStorage.getItem('reliant_notifications');
-      if (stored) {
-        try {
-          setNotifications(JSON.parse(stored));
-        } catch {}
-      }
-    });
-
-    return () => unsubscribeNotifs();
-  }, []);
-
-  const markNotificationAsRead = (id: string) => {
-    const isAdm = currentUser?.email === 'adm@empresa.com' || currentUser?.name === 'ADM';
-    const userEmail = currentUser?.email || '';
-
-    const notifRef = doc(db, 'notifications', id);
-    updateDoc(notifRef, { read: true })
-      .then(() => {
-        // Check if there are any unread notifications left for this user
-        const updated = notifications.map(n => n.id === id ? { ...n, read: true } : n);
-        const hasUnreadForUser = updated.some(n => {
-          const matchesUser = isAdm || n.targetUserEmail === userEmail;
-          return matchesUser && !n.read;
-        });
-
-        if (!hasUnreadForUser) {
-          // Clear all notifications for this user since they've read all of them
-          notifications.forEach((n) => {
-            const matchesUser = isAdm || n.targetUserEmail === userEmail;
-            if (matchesUser) {
-              deleteDoc(doc(db, 'notifications', n.id))
-                .catch(err => console.error('Error deleting read notification:', err));
+          let role = 'Customer';
+          if (isAdm) {
+            if (emailLower.includes('selante') || nameLower.includes('selante')) {
+              role = 'Customer Selantes';
+            } else if (emailLower.includes('argamassa') || nameLower.includes('argamassa')) {
+              role = 'Customer Argamassa';
+            } else if (emailLower.includes('logistica') || emailLower.includes('logistic') || nameLower.includes('logistica') || nameLower.includes('logistic')) {
+              role = 'Customer Logística';
+            } else {
+              role = 'ADM';
             }
+          } else {
+            role = session.user.user_metadata?.role || 'Agente';
+          }
+
+          const appUser: User = {
+            email: userEmail,
+            name: name,
+            role: role,
+            avatarUrl: session.user.user_metadata?.avatar_url || DEFAULT_USER.avatarUrl
+          };
+          setCurrentUser(appUser);
+          setActiveScreen(prev => {
+            if (prev === 'login' || prev === 'reset-password') {
+              const storedScreen = localStorage.getItem('reliant_active_screen');
+              return (storedScreen as ScreenType) || 'dashboard';
+            }
+            return prev;
           });
         }
-      })
-      .catch(err => console.error('Error marking notification as read:', err));
-  };
+      } catch (err) {
+        console.error('Error fetching Supabase session on mount:', err);
+      }
+    };
 
-  const markAllNotificationsAsRead = () => {
-    const isAdm = currentUser?.email === 'adm@empresa.com' || currentUser?.name === 'ADM';
-    const userEmail = currentUser?.email || '';
+    checkSession();
 
-    // Mark all as read by deleting them (replicates the clear behavior of read notifications)
-    notifications.forEach((n) => {
-      const matchesUser = isAdm || n.targetUserEmail === userEmail;
-      if (matchesUser) {
-        deleteDoc(doc(db, 'notifications', n.id))
-          .catch(err => console.error('Error deleting notification on mark all read:', err));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user) {
+        const userEmail = session.user.email || '';
+        const name = session.user.user_metadata?.name || session.user.user_metadata?.full_name || userEmail.split('@')[0];
+        const emailLower = userEmail.toLowerCase().trim();
+        const nameLower = name.toLowerCase().trim();
+        const isAdm = emailLower === 'adm@empresa.com' || 
+                      emailLower.startsWith('adm@') || 
+                      emailLower.includes('selante') || 
+                      emailLower.includes('argamassa') || 
+                      emailLower.includes('logistica') || 
+                      emailLower.includes('logistic') ||
+                      nameLower.includes('selante') ||
+                      nameLower.includes('argamassa') ||
+                      nameLower.includes('logistica') ||
+                      nameLower.includes('logistic') ||
+                      nameLower.includes('adm');
+
+        let role = 'Customer';
+        if (isAdm) {
+          if (emailLower.includes('selante') || nameLower.includes('selante')) {
+            role = 'Customer Selantes';
+          } else if (emailLower.includes('argamassa') || nameLower.includes('argamassa')) {
+            role = 'Customer Argamassa';
+          } else if (emailLower.includes('logistica') || emailLower.includes('logistic') || nameLower.includes('logistica') || nameLower.includes('logistic')) {
+            role = 'Customer Logística';
+          } else {
+            role = 'ADM';
+          }
+        } else {
+          role = session.user.user_metadata?.role || 'Agente';
+        }
+
+        const appUser: User = {
+          email: userEmail,
+          name: name,
+          role: role,
+          avatarUrl: session.user.user_metadata?.avatar_url || DEFAULT_USER.avatarUrl
+        };
+        setCurrentUser(appUser);
+        localStorage.setItem('reliant_user', JSON.stringify(appUser));
+        setActiveScreen(prev => {
+          if (prev === 'login' || prev === 'reset-password') {
+            const storedScreen = localStorage.getItem('reliant_active_screen');
+            return (storedScreen as ScreenType) || 'dashboard';
+          }
+          return prev;
+        });
+      } else {
+        if (event === 'SIGNED_OUT') {
+          setCurrentUser(null);
+          localStorage.removeItem('reliant_user');
+          localStorage.removeItem('reliant_active_screen');
+          localStorage.removeItem('reliant_selected_ticket_id');
+          setActiveScreen('login');
+        }
       }
     });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+  const [dashboardFilter, setDashboardFilter] = useState<'Todos' | 'Atribuídos' | 'Escalados'>('Todos');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<TicketStatus | null>(null);
+  const [regionFilter, setRegionFilter] = useState<'AMER' | 'EMEA' | 'APAC' | null>(null);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+
+  // 1. Subscribe to real-time tickets from Supabase
+  useEffect(() => {
+    let active = true;
+
+    const fetchTickets = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('tickets')
+          .select('*');
+
+        if (error) {
+          throw error;
+        }
+
+        if (!active) return;
+
+        if (!data || data.length === 0) {
+          const intentionallyCleared = localStorage.getItem('reliant_db_intentionally_cleared') === 'true';
+          const isSeeded = localStorage.getItem('reliant_tickets_seeded') === 'true';
+          if (intentionallyCleared || isSeeded) {
+            setTickets([]);
+            saveTickets([]);
+            return;
+          }
+
+          // If Supabase is empty, seed it with INITIAL_TICKETS
+          console.log('Seeding Supabase with initial tickets...');
+          const { error: seedErr } = await supabase
+            .from('tickets')
+            .insert(INITIAL_TICKETS);
+          
+          if (seedErr) {
+            console.error('Error seeding initial tickets to Supabase:', seedErr);
+          }
+          localStorage.setItem('reliant_tickets_seeded', 'true');
+          setTickets(INITIAL_TICKETS);
+          saveTickets(INITIAL_TICKETS);
+        } else {
+          localStorage.setItem('reliant_tickets_seeded', 'true');
+          const ticketsList = data as Ticket[];
+          ticketsList.sort((a, b) => b.id.localeCompare(a.id));
+          setTickets(ticketsList);
+          saveTickets(ticketsList);
+        }
+      } catch (err) {
+        console.error("Error fetching tickets from Supabase. Falling back to Local Storage. Please ensure you have executed /supabase_setup.sql in your Supabase dashboard.", err);
+        if (active) {
+          // Fallback to local storage if Supabase fails
+          const loaded = loadTickets();
+          setTickets(loaded);
+        }
+      }
+    };
+
+    fetchTickets();
+
+    // Subscribe to real-time updates from Supabase
+    const ticketsSubscription = supabase
+      .channel('public-tickets-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'tickets'
+        },
+        () => {
+          fetchTickets();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      active = false;
+      ticketsSubscription.unsubscribe();
+    };
+  }, []);
+
+  // 2. Subscribe to real-time notifications from Supabase
+  useEffect(() => {
+    let active = true;
+
+    const fetchNotifications = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('notifications')
+          .select('*');
+
+        if (error) {
+          throw error;
+        }
+
+        if (!active) return;
+
+        if (!data || data.length === 0) {
+          const isSeeded = localStorage.getItem('reliant_notifications_seeded') === 'true';
+          if (isSeeded) {
+            setNotifications([]);
+            localStorage.setItem('reliant_notifications', JSON.stringify([]));
+          } else {
+            console.log('Seeding Supabase with initial notifications...');
+            const { error: seedErr } = await supabase
+              .from('notifications')
+              .insert(INITIAL_NOTIFICATIONS);
+
+            if (seedErr) {
+              console.error('Error seeding notifications to Supabase:', seedErr);
+            }
+
+            localStorage.setItem('reliant_notifications_seeded', 'true');
+            setNotifications(INITIAL_NOTIFICATIONS);
+            localStorage.setItem('reliant_notifications', JSON.stringify(INITIAL_NOTIFICATIONS));
+          }
+        } else {
+          const notifsList = data as AppNotification[];
+          notifsList.sort((a, b) => b.id.localeCompare(a.id));
+          setNotifications(notifsList);
+          localStorage.setItem('reliant_notifications', JSON.stringify(notifsList));
+          localStorage.setItem('reliant_notifications_seeded', 'true');
+        }
+      } catch (err) {
+        console.error("Error fetching notifications from Supabase. Falling back to Local Storage. Please ensure you have executed /supabase_setup.sql in your Supabase dashboard.", err);
+        if (active) {
+          const stored = localStorage.getItem('reliant_notifications');
+          if (stored) {
+            try {
+              setNotifications(JSON.parse(stored));
+            } catch {}
+          }
+        }
+      }
+    };
+
+    fetchNotifications();
+
+    const notificationsSubscription = supabase
+      .channel('public-notifications-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'notifications'
+        },
+        () => {
+          fetchNotifications();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      active = false;
+      notificationsSubscription.unsubscribe();
+    };
+  }, []);
+
+  const markNotificationAsRead = async (id: string) => {
+    // Optimistic update of local state immediately
+    const updated = notifications.map(n => n.id === id ? { ...n, read: true } : n);
+    setNotifications(updated);
+    localStorage.setItem('reliant_notifications', JSON.stringify(updated));
+
+    try {
+      // Update the notification to read: true
+      const { error: updateErr } = await supabase
+        .from('notifications')
+        .update({ read: true })
+        .eq('id', id);
+
+      if (updateErr) throw updateErr;
+    } catch (err) {
+      console.error('Error marking notification as read in Supabase:', err);
+    }
   };
 
-  const clearAllNotifications = () => {
-    const isAdm = currentUser?.email === 'adm@empresa.com' || currentUser?.name === 'ADM';
+  const markAllNotificationsAsRead = async () => {
+    const emailLower = currentUser?.email?.toLowerCase() || '';
+    const nameLower = currentUser?.name?.toLowerCase() || '';
+    const roleLower = currentUser?.role?.toLowerCase() || '';
+    const isAdm = currentUser?.email === 'adm@empresa.com' || 
+                  currentUser?.name === 'ADM' ||
+                  emailLower.includes('selante') ||
+                  emailLower.includes('argamassa') ||
+                  emailLower.includes('logistica') ||
+                  emailLower.includes('logistic') ||
+                  emailLower.includes('adm') ||
+                  nameLower.includes('selante') ||
+                  nameLower.includes('argamassa') ||
+                  nameLower.includes('logistica') ||
+                  nameLower.includes('logistic') ||
+                  nameLower.includes('adm') ||
+                  roleLower.includes('selante') ||
+                  roleLower.includes('argamassa') ||
+                  roleLower.includes('logistica') ||
+                  roleLower.includes('logistic') ||
+                  roleLower.includes('adm') ||
+                  (currentUser?.role && ['ADM', 'Customer Selantes', 'Customer Argamassa', 'Customer Logística'].includes(currentUser.role));
     const userEmail = currentUser?.email || '';
 
-    notifications.forEach((n) => {
+    // Optimistic update of local state immediately
+    const updated = notifications.map(n => {
       const matchesUser = isAdm || n.targetUserEmail === userEmail;
-      if (matchesUser) {
-        deleteDoc(doc(db, 'notifications', n.id))
-          .catch(err => console.error('Error clearing notification:', err));
-      }
+      return matchesUser ? { ...n, read: true } : n;
     });
+    setNotifications(updated);
+    localStorage.setItem('reliant_notifications', JSON.stringify(updated));
+
+    try {
+      for (const n of notifications) {
+        const matchesUser = isAdm || n.targetUserEmail === userEmail;
+        if (matchesUser) {
+          await supabase
+            .from('notifications')
+            .update({ read: true })
+            .eq('id', n.id);
+        }
+      }
+    } catch (err) {
+      console.error('Error marking all notifications as read in Supabase:', err);
+    }
+  };
+
+  const clearAllNotifications = async () => {
+    const emailLower = currentUser?.email?.toLowerCase() || '';
+    const nameLower = currentUser?.name?.toLowerCase() || '';
+    const roleLower = currentUser?.role?.toLowerCase() || '';
+    const isAdm = currentUser?.email === 'adm@empresa.com' || 
+                  currentUser?.name === 'ADM' ||
+                  emailLower.includes('selante') ||
+                  emailLower.includes('argamassa') ||
+                  emailLower.includes('logistica') ||
+                  emailLower.includes('logistic') ||
+                  emailLower.includes('adm') ||
+                  nameLower.includes('selante') ||
+                  nameLower.includes('argamassa') ||
+                  nameLower.includes('logistica') ||
+                  nameLower.includes('logistic') ||
+                  nameLower.includes('adm') ||
+                  roleLower.includes('selante') ||
+                  roleLower.includes('argamassa') ||
+                  roleLower.includes('logistica') ||
+                  roleLower.includes('logistic') ||
+                  roleLower.includes('adm') ||
+                  (currentUser?.role && ['ADM', 'Customer Selantes', 'Customer Argamassa', 'Customer Logística'].includes(currentUser.role));
+    const userEmail = currentUser?.email || '';
+
+    // Optimistic update of local state immediately
+    const updated = notifications.filter(n => {
+      const matchesUser = isAdm || n.targetUserEmail === userEmail;
+      return !matchesUser;
+    });
+    setNotifications(updated);
+    localStorage.setItem('reliant_notifications', JSON.stringify(updated));
+
+    try {
+      for (const n of notifications) {
+        const matchesUser = isAdm || n.targetUserEmail === userEmail;
+        if (matchesUser) {
+          await supabase
+            .from('notifications')
+            .delete()
+            .eq('id', n.id);
+        }
+      }
+      localStorage.setItem('reliant_notifications_seeded', 'true');
+    } catch (err) {
+      console.error('Error clearing notifications in Supabase:', err);
+    }
   };
 
   const updateTicketsAndSave = (newTickets: Ticket[]) => {
@@ -241,9 +540,211 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setActiveScreen('dashboard');
   };
 
-  const logout = () => {
+  const loginWithSupabase = async (email: string, password: string, name?: string) => {
+    const cleanEmail = email.trim().toLowerCase();
+    try {
+      // 1. Try real Supabase auth
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password
+      });
+      if (!error) {
+        if (name && name.trim()) {
+          // Update user metadata in Supabase Auth
+          await supabase.auth.updateUser({
+            data: { name: name.trim() }
+          });
+          // Update profile in profiles table
+          await supabase
+            .from('profiles')
+            .upsert({ email: cleanEmail, name: name.trim() }, { onConflict: 'email' });
+        }
+        return { error: null };
+      }
+      
+      // 2. If real auth fails, check for a local password override
+      const overrides = JSON.parse(localStorage.getItem('reliant_local_passwords') || '{}');
+      if (overrides[cleanEmail] && overrides[cleanEmail] === password) {
+        // Find profile for this user from database if possible
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('email', cleanEmail)
+          .maybeSingle();
+
+        const emailLower = cleanEmail.toLowerCase().trim();
+        const nameVal = name?.trim() || profile?.name || cleanEmail.split('@')[0];
+        const nameLower = nameVal.toLowerCase().trim();
+        const isAdm = emailLower === 'adm@empresa.com' || 
+                      emailLower.startsWith('adm@') || 
+                      emailLower.includes('selante') || 
+                      emailLower.includes('argamassa') || 
+                      emailLower.includes('logistica') || 
+                      emailLower.includes('logistic') ||
+                      nameLower.includes('selante') ||
+                      nameLower.includes('argamassa') ||
+                      nameLower.includes('logistica') ||
+                      nameLower.includes('logistic') ||
+                      nameLower.includes('adm');
+
+        let role = 'Customer';
+        if (isAdm) {
+          if (emailLower.includes('selante') || nameLower.includes('selante')) {
+            role = 'Customer Selantes';
+          } else if (emailLower.includes('argamassa') || nameLower.includes('argamassa')) {
+            role = 'Customer Argamassa';
+          } else if (emailLower.includes('logistica') || emailLower.includes('logistic') || nameLower.includes('logistica') || nameLower.includes('logistic')) {
+            role = 'Customer Logística';
+          } else {
+            role = 'ADM';
+          }
+        } else {
+          role = profile?.role || 'Customer';
+        }
+
+        const appUser: User = {
+          email: cleanEmail,
+          name: nameVal,
+          role: role,
+          avatarUrl: profile?.avatarUrl || DEFAULT_USER.avatarUrl
+        };
+        setCurrentUser(appUser);
+        localStorage.setItem('reliant_user', JSON.stringify(appUser));
+        setActiveScreen('dashboard');
+        return { error: null };
+      }
+      
+      throw error;
+    } catch (err: any) {
+      console.error('Supabase Login Error:', err);
+      const isInvalidCredentials = err.message && (
+        err.message.toLowerCase().includes('invalid login credentials') ||
+        err.message.toLowerCase().includes('user not found') ||
+        err.message.toLowerCase().includes('invalid_grant')
+      );
+      if (isInvalidCredentials) {
+        try {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('email')
+            .eq('email', cleanEmail)
+            .maybeSingle();
+            
+          if (!profile) {
+            return { error: 'usuário nao cadastrado' };
+          }
+        } catch (profileSearchErr) {
+          console.error('Error searching profile table during login error handling:', profileSearchErr);
+        }
+      }
+      return { error: err.message || err };
+    }
+  };
+
+  const signUpWithSupabase = async (email: string, password: string, name: string) => {
+    try {
+      const emailLower = email.trim().toLowerCase();
+      
+      // Check if email already exists in profiles
+      const { data: existingProfile } = await supabase
+        .from('profiles')
+        .select('email')
+        .eq('email', emailLower)
+        .maybeSingle();
+
+      if (existingProfile) {
+        return { error: 'e-mail já cadastrado' };
+      }
+
+      const isAdm = emailLower === 'adm@empresa.com' || 
+                    emailLower.startsWith('adm@') || 
+                    emailLower.includes('selante') || 
+                    emailLower.includes('argamassa') || 
+                    emailLower.includes('logistica') || 
+                    emailLower.includes('logistic');
+
+      let role = 'Customer';
+      if (isAdm) {
+        if (emailLower.includes('selante')) {
+          role = 'Customer Selantes';
+        } else if (emailLower.includes('argamassa')) {
+          role = 'Customer Argamassa';
+        } else if (emailLower.includes('logistica') || emailLower.includes('logistic')) {
+          role = 'Customer Logística';
+        } else {
+          role = 'ADM';
+        }
+      }
+
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            name: name,
+            role: role
+          }
+        }
+      });
+      if (error) {
+        if (error.message && (error.message.toLowerCase().includes('already registered') || error.message.toLowerCase().includes('user already exists'))) {
+          return { error: 'e-mail já cadastrado' };
+        }
+        throw error;
+      }
+      return { error: null };
+    } catch (err: any) {
+      console.error('Supabase Sign Up Error:', err);
+      return { error: err.message || err };
+    }
+  };
+
+  const resetPasswordWithSupabase = async (email: string, password?: string) => {
+    try {
+      const cleanEmail = email.trim().toLowerCase();
+      
+      // Save password as a local override so they can use it immediately
+      if (password) {
+        const overrides = JSON.parse(localStorage.getItem('reliant_local_passwords') || '{}');
+        overrides[cleanEmail] = password;
+        localStorage.setItem('reliant_local_passwords', JSON.stringify(overrides));
+        
+        try {
+          await supabase
+            .from('profiles')
+            .update({ updatedAt: new Date().toISOString() })
+            .eq('email', cleanEmail);
+        } catch (dbErr) {
+          console.warn('Could not update profile updated_at timestamp:', dbErr);
+        }
+      }
+
+      // Trigger the real Supabase password reset request
+      try {
+        await supabase.auth.resetPasswordForEmail(cleanEmail, {
+          redirectTo: window.location.origin
+        });
+      } catch (authErr) {
+        console.warn('Supabase Auth resetPasswordForEmail warning (standard without SMTP configured):', authErr);
+      }
+
+      return { error: null };
+    } catch (err: any) {
+      console.error('Reset Password Error:', err);
+      return { error: err.message || err };
+    }
+  };
+
+  const logout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (err) {
+      console.error('Error signing out from Supabase:', err);
+    }
     setCurrentUser(null);
     localStorage.removeItem('reliant_user');
+    localStorage.removeItem('reliant_active_screen');
+    localStorage.removeItem('reliant_selected_ticket_id');
     setActiveScreen('login');
   };
 
@@ -268,6 +769,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     attachments?: Attachment[];
     city?: string;
     state?: string;
+    logisticSituation?: string;
+    customerGroup?: 'Customer Selantes' | 'Customer Argamassa' | 'Customer Logística';
   }) => {
     const now = new Date();
     const currentYear = now.getFullYear();
@@ -297,7 +800,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       minute: '2-digit'
     });
 
-    const isAdmUser = currentUser?.email === 'adm@empresa.com' || currentUser?.name === 'ADM';
+    const emailLower = currentUser?.email?.toLowerCase() || '';
+    const nameLower = currentUser?.name?.toLowerCase() || '';
+    const roleLower = currentUser?.role?.toLowerCase() || '';
+    const isAdmUser = currentUser?.email === 'adm@empresa.com' || 
+                      currentUser?.name === 'ADM' ||
+                      emailLower.includes('selante') ||
+                      emailLower.includes('argamassa') ||
+                      emailLower.includes('logistica') ||
+                      emailLower.includes('logistic') ||
+                      emailLower.includes('adm') ||
+                      nameLower.includes('selante') ||
+                      nameLower.includes('argamassa') ||
+                      nameLower.includes('logistica') ||
+                      nameLower.includes('logistic') ||
+                      nameLower.includes('adm') ||
+                      roleLower.includes('selante') ||
+                      roleLower.includes('argamassa') ||
+                      roleLower.includes('logistica') ||
+                      roleLower.includes('logistic') ||
+                      roleLower.includes('adm') ||
+                      (currentUser?.role && ['ADM', 'Customer Selantes', 'Customer Argamassa', 'Customer Logística'].includes(currentUser.role));
 
     const newTicket: Ticket = {
       id: newId,
@@ -306,6 +829,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       status: 'Aberto',
       priority: ticketData.priority,
       category: ticketData.category,
+      customerGroup: ticketData.customerGroup,
       clientName: ticketData.clientName,
       contactPerson: 'Gestor da Conta',
       contactEmail: currentUser?.email || 'contato@' + ticketData.clientName.toLowerCase().replace(/\s+/g, '') + '.com',
@@ -328,14 +852,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       customerReason: ticketData.customerReason,
       vendasNumber: ticketData.vendasNumber,
       transferReason: ticketData.transferReason,
+      logisticSituation: ticketData.logisticSituation,
       city: ticketData.city || '',
       state: ticketData.state || '',
-      createdBy: currentUser?.email || 'juniorepa@gmail.com'
+      createdBy: currentUser?.email || 'juniorepa@gmail.com',
+      createdAtIso: now.toISOString()
     };
 
-    // Write to Firestore asynchronously, real-time listener will trigger state update
-    setDoc(doc(db, 'tickets', newId.replace('/', '-')), newTicket)
-      .catch(err => console.error('Error saving ticket to Firestore:', err));
+    // Write to Supabase asynchronously
+    supabase
+      .from('tickets')
+      .upsert(newTicket)
+      .then(({ error }) => {
+        if (error) console.error('Error saving ticket to Supabase:', error);
+      });
+
+    // Instant local state update
+    const updatedTickets = [newTicket, ...tickets];
+    setTickets(updatedTickets);
+    saveTickets(updatedTickets);
 
     return newTicket;
   };
@@ -378,7 +913,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }
 
-    const isAdmUser = currentUser?.email === 'adm@empresa.com' || currentUser?.name === 'ADM';
+    const emailLower = currentUser?.email?.toLowerCase() || '';
+    const nameLower = currentUser?.name?.toLowerCase() || '';
+    const roleLower = currentUser?.role?.toLowerCase() || '';
+    const isAdmUser = currentUser?.email === 'adm@empresa.com' || 
+                      currentUser?.name === 'ADM' ||
+                      emailLower.includes('selante') ||
+                      emailLower.includes('argamassa') ||
+                      emailLower.includes('logistica') ||
+                      emailLower.includes('logistic') ||
+                      emailLower.includes('adm') ||
+                      nameLower.includes('selante') ||
+                      nameLower.includes('argamassa') ||
+                      nameLower.includes('logistica') ||
+                      nameLower.includes('logistic') ||
+                      nameLower.includes('adm') ||
+                      roleLower.includes('selante') ||
+                      roleLower.includes('argamassa') ||
+                      roleLower.includes('logistica') ||
+                      roleLower.includes('logistic') ||
+                      roleLower.includes('adm') ||
+                      (currentUser?.role && ['ADM', 'Customer Selantes', 'Customer Argamassa', 'Customer Logística'].includes(currentUser.role));
+    
+    const createdDate = ticket.createdAtIso ? new Date(ticket.createdAtIso) : new Date(Date.now() - 3600000 * 24);
+    const createdAtIso = ticket.createdAtIso || createdDate.toISOString();
 
     const updatedTicket = {
       ...ticket,
@@ -390,11 +948,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       alertRead: status === 'Retorno Solicitado' ? false : ticket.alertRead,
       updatedAt: 'Atualizado agora',
       history: [historyEntry, ...(ticket.history || [])],
-      internalNotes: notes
+      internalNotes: notes,
+      notifyOnReturn: true,
+      lastRespondedBy: currentUser?.email,
+      createdAtIso,
+      resolvedAtIso: status === 'Resolvido' ? now.toISOString() : ticket.resolvedAtIso
     };
 
-    setDoc(doc(db, 'tickets', id.replace('/', '-')), updatedTicket)
-      .catch(err => console.error('Error updating status in Firestore:', err));
+    // Write to Supabase asynchronously
+    supabase
+      .from('tickets')
+      .upsert(updatedTicket)
+      .then(({ error }) => {
+        if (error) console.error('Error updating status in Supabase:', error);
+      });
+
+    // Instant local state update
+    const updatedTickets = tickets.map(t => t.id === id ? updatedTicket : t);
+    setTickets(updatedTickets);
+    saveTickets(updatedTickets);
+
+    // Automatically generate notification alert
+    const targetUserEmail = ticket.createdBy || ticket.contactEmail;
+    const isCreator = currentUser?.email === targetUserEmail;
+    
+    const newNotif: AppNotification = {
+      id: `not-${Date.now()}`,
+      title: isCreator 
+        ? `🔄 Retorno Respondido: Chamado #${id.slice(0, 8)}`
+        : `🔔 Status do Chamado Atualizado: ${status}`,
+      description: isCreator
+        ? `O cliente ${currentUser?.name || 'Cliente'} enviou o retorno solicitado: "${technicalFeedback || 'Informações enviadas.'}"`
+        : (technicalFeedback || `Seu chamado #${id.slice(0, 8)} foi atualizado para "${status}". Clique para ver os detalhes.`),
+      time: 'Agora',
+      read: false,
+      ticketId: id,
+      targetUserEmail: isCreator ? undefined : targetUserEmail,
+      notifyRole: isCreator ? 'admin' : 'assignee',
+      senderEmail: currentUser?.email
+    };
+
+    supabase
+      .from('notifications')
+      .insert(newNotif)
+      .then(({ error }) => {
+        if (error) console.error('Error creating automatic notification in Supabase:', error);
+      });
+
+    setNotifications(prev => [newNotif, ...prev]);
   };
 
   const addInternalNote = (ticketId: string, text: string) => {
@@ -423,8 +1024,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       internalNotes: [...(ticket.internalNotes || []), newNote]
     };
 
-    setDoc(doc(db, 'tickets', ticketId.replace('/', '-')), updatedTicket)
-      .catch(err => console.error('Error adding internal note to Firestore:', err));
+    // Write to Supabase asynchronously
+    supabase
+      .from('tickets')
+      .upsert(updatedTicket)
+      .then(({ error }) => {
+        if (error) console.error('Error adding internal note to Supabase:', error);
+      });
+
+    // Instant local state update
+    const updatedTickets = tickets.map(t => t.id === ticketId ? updatedTicket : t);
+    setTickets(updatedTickets);
+    saveTickets(updatedTickets);
+
+    // Automatically generate notification alert for the ticket creator when a note is added
+    const targetUserEmail = ticket.createdBy || ticket.contactEmail;
+    if (targetUserEmail && currentUser?.email !== targetUserEmail) {
+      const newNotif: AppNotification = {
+        id: `not-${Date.now()}`,
+        title: `💬 Nova Mensagem no Chamado`,
+        description: `O agente ${currentUser?.name || 'Suporte'} adicionou uma nota: "${text.slice(0, 60)}${text.length > 60 ? '...' : ''}"`,
+        time: 'Agora',
+        read: false,
+        ticketId: ticketId,
+        targetUserEmail: targetUserEmail,
+        notifyRole: 'assignee',
+        senderEmail: currentUser?.email
+      };
+
+      supabase
+        .from('notifications')
+        .insert(newNotif)
+        .then(({ error }) => {
+          if (error) console.error('Error creating automatic note notification in Supabase:', error);
+        });
+
+      setNotifications(prev => [newNotif, ...prev]);
+    }
   };
 
   const addAttachment = (ticketId: string, name: string, url: string) => {
@@ -442,8 +1078,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       attachments: [...(ticket.attachments || []), newAttachment]
     };
 
-    setDoc(doc(db, 'tickets', ticketId.replace('/', '-')), updatedTicket)
-      .catch(err => console.error('Error adding attachment to Firestore:', err));
+    // Write to Supabase asynchronously
+    supabase
+      .from('tickets')
+      .upsert(updatedTicket)
+      .then(({ error }) => {
+        if (error) console.error('Error adding attachment to Supabase:', error);
+      });
+
+    // Instant local state update
+    const updatedTickets = tickets.map(t => t.id === ticketId ? updatedTicket : t);
+    setTickets(updatedTickets);
+    saveTickets(updatedTickets);
   };
 
   const emitTicketAlert = (ticketId: string, alertTitle: string, alertDescription: string) => {
@@ -475,12 +1121,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       history: [historyEntry, ...(ticket.history || [])]
     };
 
-    setDoc(doc(db, 'tickets', ticketId.replace('/', '-')), updatedTicket)
-      .catch(err => console.error('Error emitting alert to Firestore:', err));
+    // Write ticket update to Supabase
+    supabase
+      .from('tickets')
+      .upsert(updatedTicket)
+      .then(({ error }) => {
+        if (error) console.error('Error emitting alert to Supabase:', error);
+      });
+
+    // Instant local state update
+    const updatedTickets = tickets.map(t => t.id === ticketId ? updatedTicket : t);
+    setTickets(updatedTickets);
+    saveTickets(updatedTickets);
 
     const targetUserEmail = ticket.createdBy || ticket.contactEmail || 'juniorepa@gmail.com';
 
-    // Add alert to global notifications list in Firestore
+    // Add alert to global notifications list in Supabase
     const newNotif: AppNotification = {
       id: `not-${Date.now()}`,
       title: `🔔 Alerta: ${alertTitle}`,
@@ -488,27 +1144,137 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       time: 'Agora',
       read: false,
       ticketId: ticketId,
-      targetUserEmail: targetUserEmail
+      targetUserEmail: targetUserEmail,
+      senderEmail: currentUser?.email
     };
 
-    setDoc(doc(db, 'notifications', newNotif.id), newNotif)
-      .catch(err => console.error('Error creating notification in Firestore:', err));
+    supabase
+      .from('notifications')
+      .insert(newNotif)
+      .then(({ error }) => {
+        if (error) console.error('Error creating notification in Supabase:', error);
+      });
+
+    // Instant local notifications update
+    setNotifications(prev => [newNotif, ...prev]);
   };
 
-  const resetAllData = () => {
-    const batch = writeBatch(db);
-    tickets.forEach((t) => {
-      batch.delete(doc(db, 'tickets', t.id.replace('/', '-')));
-    });
+  const rateTicket = (ticketId: string, rating: 'Bom' | 'Ruim' | 'Ótimo', comment?: string) => {
+    const ticket = tickets.find(t => t.id === ticketId);
+    if (!ticket) return;
 
-    INITIAL_TICKETS.forEach((ticket) => {
-      const ticketRef = doc(db, 'tickets', ticket.id.replace('/', '-'));
-      batch.set(ticketRef, ticket);
-    });
+    const updatedTicket: Ticket = {
+      ...ticket,
+      rating,
+      ratingComment: comment || ''
+    };
 
-    batch.commit()
-      .then(() => console.log('Firestore database reset to initial tickets successfully.'))
-      .catch((err) => console.error('Error resetting Firestore data:', err));
+    // Write to Supabase asynchronously
+    supabase
+      .from('tickets')
+      .upsert(updatedTicket)
+      .then(({ error }) => {
+        if (error) console.error('Error saving rating to Supabase:', error);
+      });
+
+    // Instant local state update
+    const updatedTickets = tickets.map(t => t.id === ticketId ? updatedTicket : t);
+    setTickets(updatedTickets);
+    saveTickets(updatedTickets);
+  };
+
+  const resetAllData = async () => {
+    try {
+      localStorage.removeItem('reliant_db_intentionally_cleared');
+      localStorage.setItem('reliant_tickets_seeded', 'true');
+      
+      // Clear tickets table
+      await supabase
+        .from('tickets')
+        .delete()
+        .neq('id', 'dummy-unmatched-id');
+
+      // Seed initial tickets
+      const { error: insertErr } = await supabase
+        .from('tickets')
+        .insert(INITIAL_TICKETS);
+
+      if (insertErr) throw insertErr;
+
+      console.log('Supabase database reset to initial tickets successfully.');
+      setTickets(INITIAL_TICKETS);
+      saveTickets(INITIAL_TICKETS);
+
+      // Clear notifications table
+      await supabase
+        .from('notifications')
+        .delete()
+        .neq('id', 'dummy-unmatched-id');
+
+      // Seed initial notifications
+      const { error: seedNotifErr } = await supabase
+        .from('notifications')
+        .insert(INITIAL_NOTIFICATIONS);
+
+      if (seedNotifErr) throw seedNotifErr;
+
+      console.log('Supabase database reset to initial notifications successfully.');
+      localStorage.setItem('reliant_notifications_seeded', 'true');
+      setNotifications(INITIAL_NOTIFICATIONS);
+      localStorage.setItem('reliant_notifications', JSON.stringify(INITIAL_NOTIFICATIONS));
+
+    } catch (err) {
+      console.error('Error resetting Supabase data:', err);
+      // Local fallback
+      localStorage.removeItem('reliant_db_intentionally_cleared');
+      localStorage.setItem('reliant_tickets_seeded', 'true');
+      setTickets(INITIAL_TICKETS);
+      saveTickets(INITIAL_TICKETS);
+      setNotifications(INITIAL_NOTIFICATIONS);
+      localStorage.setItem('reliant_notifications', JSON.stringify(INITIAL_NOTIFICATIONS));
+    }
+  };
+
+  const clearAllTickets = async () => {
+    try {
+      localStorage.setItem('reliant_db_intentionally_cleared', 'true');
+      localStorage.setItem('reliant_tickets_seeded', 'true');
+      
+      // Clear tickets table in Supabase
+      await supabase
+        .from('tickets')
+        .delete()
+        .neq('id', 'dummy-unmatched-id');
+
+      // Clear notifications table in Supabase
+      await supabase
+        .from('notifications')
+        .delete()
+        .neq('id', 'dummy-unmatched-id');
+
+      console.log('All tickets and notifications cleared successfully.');
+      
+      // Reset local state instantly
+      setTickets([]);
+      saveTickets([]);
+      setSelectedTicketId(null);
+      localStorage.removeItem('reliant_selected_ticket_id');
+
+      setNotifications([]);
+      localStorage.setItem('reliant_notifications', JSON.stringify([]));
+      localStorage.setItem('reliant_notifications_seeded', 'true');
+    } catch (err) {
+      console.error('Error clearing data from Supabase:', err);
+      // Local fallback
+      localStorage.setItem('reliant_db_intentionally_cleared', 'true');
+      localStorage.setItem('reliant_tickets_seeded', 'true');
+      setTickets([]);
+      saveTickets([]);
+      setSelectedTicketId(null);
+      localStorage.removeItem('reliant_selected_ticket_id');
+      setNotifications([]);
+      localStorage.setItem('reliant_notifications', JSON.stringify([]));
+    }
   };
 
   return (
@@ -520,8 +1286,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         selectedTicketId,
         dashboardFilter,
         searchQuery,
+        statusFilter,
+        setStatusFilter,
+        regionFilter,
+        setRegionFilter,
         login,
         logout,
+        loginWithSupabase,
+        signUpWithSupabase,
+        resetPasswordWithSupabase,
         setScreen,
         selectTicket,
         setDashboardFilter,
@@ -531,7 +1304,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addInternalNote,
         addAttachment,
         emitTicketAlert,
+        rateTicket,
         resetAllData,
+        clearAllTickets,
         notifications,
         markNotificationAsRead,
         markAllNotificationsAsRead,

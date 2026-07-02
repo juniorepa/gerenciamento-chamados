@@ -13,24 +13,48 @@ import {
   X, 
   Plus,
   Lock,
-  HelpCircle
+  HelpCircle,
+  MessageSquare
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { TicketStatus } from '../types';
 
 export const ResolveScreen: React.FC = () => {
-  const { tickets, selectedTicketId, setScreen, updateTicketStatus, addAttachment, currentUser } = useApp();
+  const { tickets, selectedTicketId, setScreen, updateTicketStatus, addAttachment, currentUser, logout, setStatusFilter, emitTicketAlert } = useApp();
   
   // Find the selected ticket or default to the first one
   const ticket = tickets.find(t => t.id === selectedTicketId) || tickets[0];
 
-  const isAdm = currentUser?.email === 'adm@empresa.com' || currentUser?.name === 'ADM';
+  const emailLower = currentUser?.email?.toLowerCase() || '';
+  const nameLower = currentUser?.name?.toLowerCase() || '';
+  const roleLower = currentUser?.role?.toLowerCase() || '';
+  const isAdm = currentUser?.email === 'adm@empresa.com' || 
+                currentUser?.name === 'ADM' ||
+                emailLower.includes('selante') ||
+                emailLower.includes('argamassa') ||
+                emailLower.includes('logistica') ||
+                emailLower.includes('logistic') ||
+                emailLower.includes('adm') ||
+                nameLower.includes('selante') ||
+                nameLower.includes('argamassa') ||
+                nameLower.includes('logistica') ||
+                nameLower.includes('logistic') ||
+                nameLower.includes('adm') ||
+                roleLower.includes('selante') ||
+                roleLower.includes('argamassa') ||
+                roleLower.includes('logistica') ||
+                roleLower.includes('logistic') ||
+                roleLower.includes('adm') ||
+                (currentUser?.role && ['ADM', 'Customer Selantes', 'Customer Argamassa', 'Customer Logística'].includes(currentUser.role));
 
   const [selectedStatus, setSelectedStatus] = useState<TicketStatus>(isAdm ? 'Resolvido' : 'Em Espera');
   const [feedback, setFeedback] = useState('');
   const [isInternalNote, setIsInternalNote] = useState(false);
   const [internalNoteText, setInternalNoteText] = useState('');
   const [attachedFiles, setAttachedFiles] = useState<{ name: string; size: string; url: string }[]>([]);
+  const [showPhotoSource, setShowPhotoSource] = useState(false);
+  const [clientMessage, setClientMessage] = useState('');
+  const [messageSent, setMessageSent] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!ticket) {
@@ -45,7 +69,20 @@ export const ResolveScreen: React.FC = () => {
   }
 
   const handleAttachClick = () => {
-    fileInputRef.current?.click();
+    setShowPhotoSource(true);
+  };
+
+  const triggerFileInput = (useCamera: boolean) => {
+    if (fileInputRef.current) {
+      if (useCamera) {
+        fileInputRef.current.setAttribute('capture', 'environment');
+        fileInputRef.current.removeAttribute('multiple');
+      } else {
+        fileInputRef.current.removeAttribute('capture');
+        fileInputRef.current.setAttribute('multiple', 'true');
+      }
+      fileInputRef.current.click();
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -87,6 +124,13 @@ export const ResolveScreen: React.FC = () => {
       addAttachment(ticket.id, f.name, f.url);
     });
 
+    // If status is 'Retorno Solicitado' and notification wasn't sent yet, send it automatically!
+    if (selectedStatus === 'Retorno Solicitado') {
+      const finalMessage = clientMessage.trim() || `Olá! Solicitamos o seu retorno no chamado ${ticket.id} (${ticket.title}). Por favor, verifique os detalhes do chamado e forneça as informações ou fotos necessárias.`;
+      emitTicketAlert(ticket.id, 'Retorno Solicitado pós-venda', finalMessage);
+      setMessageSent(true);
+    }
+
     // Call state update in context
     updateTicketStatus(
       ticket.id, 
@@ -97,6 +141,7 @@ export const ResolveScreen: React.FC = () => {
     );
 
     alert(`Chamado ${ticket.id} atualizado com sucesso para o status: ${selectedStatus}!`);
+    setStatusFilter('Aberto');
     setScreen('dashboard');
   };
 
@@ -256,6 +301,74 @@ export const ResolveScreen: React.FC = () => {
             )}
           </div>
 
+          {/* Conditional Mensagem para o Cliente Section (Retorno Solicitado status only) */}
+          {selectedStatus === 'Retorno Solicitado' && (
+            <motion.div
+              initial={{ opacity: 0, y: -10, height: 0 }}
+              animate={{ opacity: 1, y: 0, height: 'auto' }}
+              transition={{ duration: 0.2 }}
+              className="p-4 bg-indigo-50 border-2 border-indigo-200 rounded-xl space-y-3 shadow-inner text-left"
+            >
+              <div className="flex items-center gap-2">
+                <MessageSquare className="w-5 h-5 text-indigo-600" />
+                <span className="font-bold text-xs text-indigo-800 uppercase tracking-wider">
+                  Mensagem para o Cliente (Notificação)
+                </span>
+              </div>
+              
+              <div className="relative">
+                <MessageSquare className="absolute left-3.5 top-3.5 w-5 h-5 text-indigo-400" />
+                <textarea
+                  id="client-message-input"
+                  value={clientMessage}
+                  onChange={(e) => {
+                    setClientMessage(e.target.value);
+                    setMessageSent(false);
+                  }}
+                  placeholder="Escreva a mensagem que o cliente receberá explicando o que é necessário..."
+                  rows={3}
+                  className="w-full bg-white border border-indigo-200 rounded-xl pl-11 pr-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:border-transparent transition-all placeholder:text-gray-400 text-gray-800 resize-none"
+                />
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2 items-center justify-between">
+                <div className="flex gap-1 items-center text-[11px] text-indigo-700/80 font-medium">
+                  <span>💡</span>
+                  <span>O cliente receberá isto como um alerta em tempo real.</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!clientMessage.trim()) {
+                      alert('Por favor, escreva a mensagem antes de enviar.');
+                      return;
+                    }
+                    emitTicketAlert(ticket.id, 'Retorno Solicitado pós-venda', clientMessage.trim());
+                    setMessageSent(true);
+                    alert('Sua mensagem de solicitação de retorno foi enviada com sucesso para as notificações do cliente!');
+                  }}
+                  className={`w-full sm:w-auto px-4 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow transition-all active:scale-95 ${
+                    messageSent 
+                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white' 
+                      : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                  }`}
+                >
+                  {messageSent ? (
+                    <>
+                      <CheckCircle2 className="w-4 h-4" />
+                      Mensagem Enviada!
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-3.5 h-3.5" />
+                      Enviar Mensagem ao Cliente
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          )}
+
           {/* Text Feedback input section */}
           <div>
             <label htmlFor="technical-feedback" className="block text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider">
@@ -394,19 +507,79 @@ export const ResolveScreen: React.FC = () => {
           <CheckCircle2 className="w-5 h-5" />
           <span className="text-[10px] font-semibold mt-0.5">Painel</span>
         </button>
-        <button onClick={() => setScreen('new-ticket')} className="flex flex-col items-center justify-center text-gray-500">
-          <Plus className="w-5 h-5" />
-          <span className="text-[10px] font-semibold mt-0.5">Novo Chamado</span>
-        </button>
-        <button onClick={() => alert('Sua fila de chamados está atualizada.')} className="flex flex-col items-center justify-center text-gray-500">
+        {!isAdm && (
+          <button onClick={() => setScreen('new-ticket')} className="flex flex-col items-center justify-center text-gray-500">
+            <Plus className="w-5 h-5" />
+            <span className="text-[10px] font-semibold mt-0.5">Novo Chamado</span>
+          </button>
+        )}
+        <button 
+          onClick={() => {
+            localStorage.setItem('open_status_modal', 'true');
+            setScreen('dashboard');
+          }} 
+          className="flex flex-col items-center justify-center text-gray-500 hover:text-[#00236f] transition-colors"
+          title="Ver Status dos Chamados"
+        >
           <FileText className="w-5 h-5" />
           <span className="text-[10px] font-semibold mt-0.5">Status</span>
         </button>
-        <button onClick={() => setScreen('login')} className="flex flex-col items-center justify-center text-gray-500">
+        <button 
+          onClick={logout} 
+          className="flex flex-col items-center justify-center text-gray-500 hover:text-red-600 transition-colors"
+          title="Sair da Conta"
+        >
           <X className="w-5 h-5" />
           <span className="text-[10px] font-semibold mt-0.5">Sair</span>
         </button>
       </nav>
+
+      {/* Origin/Source Selection Modal */}
+      {showPhotoSource && (
+        <div className="fixed inset-0 bg-black/60 z-55 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="absolute inset-0" onClick={() => setShowPhotoSource(false)} />
+          <motion.div 
+            initial={{ opacity: 0, y: 100 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="relative w-full sm:max-w-sm bg-white rounded-t-3xl sm:rounded-2xl p-6 shadow-2xl z-10 space-y-4"
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+              <h3 className="font-extrabold text-xs text-gray-400 uppercase tracking-wider">Origem do Anexo</h3>
+              <button onClick={() => setShowPhotoSource(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPhotoSource(false);
+                  triggerFileInput(true);
+                }}
+                className="flex flex-col items-center justify-center p-5 border border-gray-150 rounded-xl hover:bg-blue-50/20 active:scale-95 transition-all gap-2 text-[#00236f]"
+              >
+                <div className="bg-blue-50 p-3 rounded-full">
+                  <Camera className="w-6 h-6 text-[#00236f]" />
+                </div>
+                <span className="text-xs font-bold">Usar Câmera</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPhotoSource(false);
+                  triggerFileInput(false);
+                }}
+                className="flex flex-col items-center justify-center p-5 border border-gray-150 rounded-xl hover:bg-blue-50/20 active:scale-95 transition-all gap-2 text-[#00236f]"
+              >
+                <div className="bg-blue-50 p-3 rounded-full">
+                  <Plus className="w-6 h-6 text-[#00236f]" />
+                </div>
+                <span className="text-xs font-bold">Galeria/Arquivos</span>
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 };

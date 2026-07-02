@@ -16,13 +16,17 @@ import {
   CheckCircle,
   X,
   History,
-  Plus
+  Plus,
+  Lock,
+  Droplet,
+  Layers,
+  Truck
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { TicketCategory, TicketPriority, Attachment } from '../types';
 
 export const NewTicketScreen: React.FC = () => {
-  const { createTicket, setScreen } = useApp();
+  const { createTicket, setScreen, logout } = useApp();
   
   // Tab category switcher state
   const [activeTab, setActiveTab] = useState<TicketCategory>('ADM');
@@ -37,19 +41,51 @@ export const NewTicketScreen: React.FC = () => {
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState<TicketPriority>('Média');
 
+  // Customer Group Selection state
+  const [selectedCustomerGroup, setSelectedCustomerGroup] = useState<'Customer Selantes' | 'Customer Argamassa' | 'Customer Logística' | null>(null);
+
+  React.useEffect(() => {
+    if (selectedCustomerGroup === 'Customer Logística') {
+      if (activeTab !== 'Logístico') {
+        setActiveTab('Logístico');
+      }
+    } else if (selectedCustomerGroup) {
+      if (activeTab === 'Logístico') {
+        setActiveTab('ADM');
+      }
+    }
+  }, [selectedCustomerGroup]);
+
   // Remanejamento transfer state fields
   const [customerReason, setCustomerReason] = useState('');
   const [vendasNumber, setVendasNumber] = useState('');
   const [transferReason, setTransferReason] = useState('');
 
+  // Logístico state fields
+  const [logisticSituation, setLogisticSituation] = useState('Atraso na Entrega');
+
   // Attached files local state list
   const [uploadedImages, setUploadedImages] = useState<Attachment[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [showPhotoSource, setShowPhotoSource] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const handleAttachClick = () => {
-    fileInputRef.current?.click();
+    setShowPhotoSource(true);
+  };
+
+  const triggerFileInput = (useCamera: boolean) => {
+    if (fileInputRef.current) {
+      if (useCamera) {
+        fileInputRef.current.setAttribute('capture', 'environment');
+        fileInputRef.current.removeAttribute('multiple');
+      } else {
+        fileInputRef.current.removeAttribute('capture');
+        fileInputRef.current.setAttribute('multiple', 'true');
+      }
+      fileInputRef.current.click();
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -84,6 +120,10 @@ export const NewTicketScreen: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!selectedCustomerGroup) {
+      alert('Por favor, selecione para qual Customer o chamado foi aberto.');
+      return;
+    }
     if (!clientName.trim()) {
       alert('Por favor, preencha o Nome do Cliente.');
       return;
@@ -110,6 +150,8 @@ export const NewTicketScreen: React.FC = () => {
       createTicket({
         title: activeTab === 'Remanejamento' 
           ? `Remanejamento de Conta: ${clientName}` 
+          : activeTab === 'Logístico'
+          ? `Incidente Logístico [${logisticSituation}]: ${clientName}`
           : activeTab === 'Comercial'
           ? `Solicitação Comercial: ${description.slice(0, 40)}...`
           : `Problema Técnico: ${description.slice(0, 40)}...`,
@@ -121,6 +163,8 @@ export const NewTicketScreen: React.FC = () => {
         customerReason: activeTab === 'Remanejamento' ? customerReason : undefined,
         vendasNumber: activeTab === 'Remanejamento' ? vendasNumber : undefined,
         transferReason: activeTab === 'Remanejamento' ? transferReason : undefined,
+        logisticSituation: activeTab === 'Logístico' ? logisticSituation : undefined,
+        customerGroup: selectedCustomerGroup,
         attachments: uploadedImages,
         city: city || undefined,
         state: state || undefined
@@ -169,37 +213,113 @@ export const NewTicketScreen: React.FC = () => {
             Registro de Chamado
           </h2>
           <p className="text-xs text-gray-500 font-medium">
-            Selecione a categoria para iniciar o registro da solicitação de pós-venda.
+            Selecione o Customer e em seguida preencha os dados do atendimento pós-venda.
           </p>
         </div>
 
-        {/* Segmented control category switch buttons container */}
-        <div className="relative bg-gray-200/70 rounded-xl p-1 flex items-center h-12">
-          <button 
-            type="button"
-            onClick={() => handleTabChange('ADM')}
-            className={`flex-1 text-center font-bold text-xs py-2 rounded-lg z-10 transition-all duration-200 ${activeTab === 'ADM' ? 'bg-[#00236f] text-white shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}
-          >
-            ADM
-          </button>
-          <button 
-            type="button"
-            onClick={() => handleTabChange('Comercial')}
-            className={`flex-1 text-center font-bold text-xs py-2 rounded-lg z-10 transition-all duration-200 ${activeTab === 'Comercial' ? 'bg-[#00236f] text-white shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}
-          >
-            COMERCIAL
-          </button>
-          <button 
-            type="button"
-            onClick={() => handleTabChange('Remanejamento')}
-            className={`flex-1 text-center font-bold text-xs py-2 rounded-lg z-10 transition-all duration-200 ${activeTab === 'Remanejamento' ? 'bg-[#00236f] text-white shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}
-          >
-            REMANEJAMENTO
-          </button>
+        {/* Seleção de Customer */}
+        <div className="bg-white border border-gray-150 p-5 rounded-2xl shadow-sm space-y-4 animate-in fade-in duration-300">
+          <label className="block text-[11px] font-extrabold text-[#00236f] uppercase tracking-wider ml-1">
+            Selecione a Unidade de Atendimento (Customer) *
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <button
+              type="button"
+              onClick={() => setSelectedCustomerGroup('Customer Selantes')}
+              className={`flex flex-col items-center justify-center p-4 border rounded-xl active:scale-[0.98] transition-all gap-2 ${
+                selectedCustomerGroup === 'Customer Selantes'
+                  ? 'bg-blue-50 border-[#00236f] text-[#00236f] font-bold ring-2 ring-[#00236f]/20 shadow-sm'
+                  : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              <Droplet className="w-7 h-7 text-blue-600 animate-pulse duration-1000" />
+              <span className="text-xs font-black tracking-tight text-center">Customer Selantes</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSelectedCustomerGroup('Customer Argamassa')}
+              className={`flex flex-col items-center justify-center p-4 border rounded-xl active:scale-[0.98] transition-all gap-2 ${
+                selectedCustomerGroup === 'Customer Argamassa'
+                  ? 'bg-amber-50 border-amber-500 text-amber-800 font-bold ring-2 ring-amber-500/20 shadow-sm'
+                  : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              <Layers className="w-7 h-7 text-amber-600" />
+              <span className="text-xs font-black tracking-tight text-center">Customer Argamassa</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSelectedCustomerGroup('Customer Logística')}
+              className={`flex flex-col items-center justify-center p-4 border rounded-xl active:scale-[0.98] transition-all gap-2 ${
+                selectedCustomerGroup === 'Customer Logística'
+                  ? 'bg-emerald-50 border-emerald-500 text-emerald-800 font-bold ring-2 ring-emerald-500/20 shadow-sm'
+                  : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+              }`}
+            >
+              <Truck className="w-7 h-7 text-emerald-600" />
+              <span className="text-xs font-black tracking-tight text-center">Customer Logística</span>
+            </button>
+          </div>
         </div>
 
-        {/* Dynamic Form content */}
-        <form onSubmit={handleSubmit} className="space-y-5">
+        {!selectedCustomerGroup ? (
+          <div className="bg-gray-50 border border-dashed border-gray-200 rounded-2xl p-10 flex flex-col items-center justify-center text-center space-y-4 animate-in fade-in duration-200 shadow-inner">
+            <div className="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 border border-gray-150 shadow-sm">
+              <Lock className="w-6 h-6 text-[#00236f]" />
+            </div>
+            <div className="space-y-1">
+              <h4 className="text-sm font-black text-gray-700">Formulário de Abertura Bloqueado</h4>
+              <p className="text-xs text-gray-400 max-w-sm font-medium leading-relaxed">
+                Você precisa escolher uma unidade **Customer** acima para liberar o preenchimento, seleção de categoria e o envio do chamado.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-6 animate-in fade-in slide-in-from-top-3 duration-300">
+            {/* Segmented control category switch buttons container */}
+            <div className={`relative bg-gray-200/70 rounded-xl p-1 grid items-center h-12 ${
+              selectedCustomerGroup === 'Customer Logística' ? 'grid-cols-1' : 'grid-cols-3'
+            }`}>
+              {(selectedCustomerGroup === 'Customer Selantes' || selectedCustomerGroup === 'Customer Argamassa') && (
+                <>
+                  <button 
+                    type="button"
+                    onClick={() => handleTabChange('ADM')}
+                    className={`text-center font-bold text-[10px] sm:text-xs py-2 rounded-lg z-10 transition-all duration-200 ${activeTab === 'ADM' ? 'bg-[#00236f] text-white shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}
+                  >
+                    ADM
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => handleTabChange('Comercial')}
+                    className={`text-center font-bold text-[10px] sm:text-xs py-2 rounded-lg z-10 transition-all duration-200 ${activeTab === 'Comercial' ? 'bg-[#00236f] text-white shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}
+                  >
+                    COMERCIAL
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => handleTabChange('Remanejamento')}
+                    className={`text-center font-bold text-[9px] sm:text-xs py-2 rounded-lg z-10 transition-all duration-200 ${activeTab === 'Remanejamento' ? 'bg-[#00236f] text-white shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}
+                  >
+                    REMANEJAMENTO
+                  </button>
+                </>
+              )}
+              {selectedCustomerGroup === 'Customer Logística' && (
+                <button 
+                  type="button"
+                  onClick={() => handleTabChange('Logístico')}
+                  className={`text-center font-bold text-[10px] sm:text-xs py-2 rounded-lg z-10 transition-all duration-200 ${activeTab === 'Logístico' ? 'bg-[#00236f] text-white shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}
+                >
+                  LOGÍSTICO
+                </button>
+              )}
+            </div>
+
+            {/* Dynamic Form content */}
+            <form onSubmit={handleSubmit} className="space-y-5">
           
           {/* Cliente Name input (Universal to all tabs) */}
           <div className="group">
@@ -282,8 +402,29 @@ export const NewTicketScreen: React.FC = () => {
 
           {/* Conditional Fields based on active tab category */}
           {activeTab !== 'Remanejamento' ? (
-            <div className="space-y-5">
+            <div className="space-y-5 animate-in fade-in slide-in-from-top-2 duration-200">
               
+              {activeTab === 'Logístico' && (
+                <div className="group animate-in fade-in slide-in-from-top-2 duration-250">
+                  <label htmlFor="logistic-situation" className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2 ml-1">
+                    Situação Logística
+                  </label>
+                  <select
+                    id="logistic-situation"
+                    required
+                    value={logisticSituation}
+                    onChange={(e) => setLogisticSituation(e.target.value)}
+                    className="w-full h-12 px-4 bg-white border border-gray-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#00236f] focus:border-transparent transition-all text-gray-800"
+                  >
+                    <option value="Atraso na Entrega">Atraso na Entrega</option>
+                    <option value="Avaria">Avaria</option>
+                    <option value="Falta de Volumes na Entrega">Falta de Volumes na Entrega</option>
+                    <option value="Entrega em Local Errado">Entrega em Local Errado</option>
+                    <option value="Outros">Outros Incidentes Logísticos</option>
+                  </select>
+                </div>
+              )}
+
               {/* Date and Quantity reclama grid */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="group">
@@ -342,7 +483,7 @@ export const NewTicketScreen: React.FC = () => {
               {/* Problem Description text area */}
               <div className="group">
                 <label htmlFor="problem-desc" className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2 ml-1">
-                  Descrição do Problema
+                  {activeTab === 'Logístico' ? 'Comentários da Ocorrência' : 'Descrição do Problema'}
                 </label>
                 <div className="relative">
                   <textarea
@@ -350,7 +491,7 @@ export const NewTicketScreen: React.FC = () => {
                     required
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Detalhe o ocorrido..."
+                    placeholder={activeTab === 'Logístico' ? 'Descreva os detalhes da ocorrência logística...' : 'Detalhe o ocorrido...'}
                     rows={4}
                     className="w-full p-4 bg-white border border-gray-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#00236f] focus:border-transparent transition-all placeholder:text-gray-400 text-gray-800 resize-none"
                   />
@@ -512,6 +653,8 @@ export const NewTicketScreen: React.FC = () => {
           </div>
 
         </form>
+          </div>
+        )}
       </main>
 
       {/* Navigation bottom bar menu options list layout */}
@@ -524,15 +667,73 @@ export const NewTicketScreen: React.FC = () => {
           <Plus className="w-5 h-5" />
           <span className="text-[10px] font-bold mt-0.5">Novo Chamado</span>
         </button>
-        <button onClick={() => alert('Filtro rápido ativado!')} className="flex flex-col items-center justify-center text-gray-500 hover:text-[#00236f] transition-all">
+         <button 
+          onClick={() => {
+            localStorage.setItem('open_status_modal', 'true');
+            setScreen('dashboard');
+          }} 
+          className="flex flex-col items-center justify-center text-gray-500 hover:text-[#00236f] transition-all"
+          title="Ver Status dos Chamados"
+        >
           <FileText className="w-5 h-5" />
           <span className="text-[10px] font-semibold mt-0.5">Status</span>
         </button>
-        <button onClick={() => setScreen('login')} className="flex flex-col items-center justify-center text-gray-500 hover:text-red-600 transition-all">
+        <button 
+          onClick={logout} 
+          className="flex flex-col items-center justify-center text-gray-500 hover:text-red-600 transition-all"
+          title="Sair da Conta"
+        >
           <X className="w-5 h-5" />
           <span className="text-[10px] font-semibold mt-0.5">Sair</span>
         </button>
       </nav>
+
+      {/* Origin/Source Selection Modal */}
+      {showPhotoSource && (
+        <div className="fixed inset-0 bg-black/60 z-55 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="absolute inset-0" onClick={() => setShowPhotoSource(false)} />
+          <motion.div 
+            initial={{ opacity: 0, y: 100 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="relative w-full sm:max-w-sm bg-white rounded-t-3xl sm:rounded-2xl p-6 shadow-2xl z-10 space-y-4"
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+              <h3 className="font-extrabold text-xs text-gray-400 uppercase tracking-wider">Origem do Anexo</h3>
+              <button onClick={() => setShowPhotoSource(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPhotoSource(false);
+                  triggerFileInput(true);
+                }}
+                className="flex flex-col items-center justify-center p-5 border border-gray-150 rounded-xl hover:bg-blue-50/20 active:scale-95 transition-all gap-2 text-[#00236f]"
+              >
+                <div className="bg-blue-50 p-3 rounded-full">
+                  <Camera className="w-6 h-6 text-[#00236f]" />
+                </div>
+                <span className="text-xs font-bold">Usar Câmera</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPhotoSource(false);
+                  triggerFileInput(false);
+                }}
+                className="flex flex-col items-center justify-center p-5 border border-gray-150 rounded-xl hover:bg-blue-50/20 active:scale-95 transition-all gap-2 text-[#00236f]"
+              >
+                <div className="bg-blue-50 p-3 rounded-full">
+                  <Plus className="w-6 h-6 text-[#00236f]" />
+                </div>
+                <span className="text-xs font-bold">Galeria/Arquivos</span>
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 };
