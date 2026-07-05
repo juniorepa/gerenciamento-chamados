@@ -38,7 +38,7 @@ interface AppContextType {
   login: (email: string, name: string) => void;
   logout: () => void;
   loginWithSupabase: (email: string, password: string, name?: string) => Promise<{ error: any }>;
-  signUpWithSupabase: (email: string, password: string, name: string) => Promise<{ error: any }>;
+  signUpWithSupabase: (email: string, password: string, name: string, role?: string) => Promise<{ error: any }>;
   resetPasswordWithSupabase: (email: string, password?: string) => Promise<{ error: any }>;
   setScreen: (screen: ScreenType) => void;
   selectTicket: (id: string | null) => void;
@@ -641,7 +641,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const signUpWithSupabase = async (email: string, password: string, name: string) => {
+  const signUpWithSupabase = async (email: string, password: string, name: string, selectedRole?: string) => {
     try {
       const emailLower = email.trim().toLowerCase();
       
@@ -663,7 +663,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                     emailLower.includes('logistica') || 
                     emailLower.includes('logistic');
 
-      let role = 'Vendedor/Representante';
+      let role = selectedRole || 'Vendedor/Representante';
       if (isAdm) {
         if (emailLower.includes('selante')) {
           role = 'Customer Selantes';

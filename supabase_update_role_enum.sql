@@ -8,10 +8,13 @@
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
-    CREATE TYPE public.user_role AS ENUM ('Vendedor/Representante', 'Customer', 'Adm');
+    CREATE TYPE public.user_role AS ENUM ('Vendedor/Representante', 'Customer', 'Adm', 'Gestor de Customer');
   END IF;
 END
 $$;
+
+-- Garantir que a nova role exista se o tipo ENUM já existia anteriormente
+ALTER TYPE public.user_role ADD VALUE IF NOT EXISTS 'Gestor de Customer';
 
 -- 2. Atualizar a coluna 'role' na tabela 'profiles' para usar o novo tipo ENUM
 -- Primeiramente, removemos o valor padrão temporariamente
@@ -24,7 +27,8 @@ ALTER TABLE public.profiles
     CASE 
       WHEN role = 'ADM' OR role = 'Adm' THEN 'Adm'::public.user_role
       WHEN role = 'Vendedor/Representante' THEN 'Vendedor/Representante'::public.user_role
-      ELSE 'Customer'::public.user_role
+      WHEN role = 'Gestor de Customer' THEN 'Gestor de Customer'::public.user_role
+      ELSE 'Vendedor/Representante'::public.user_role
     END
   );
 
@@ -43,6 +47,7 @@ BEGIN
     CASE 
       WHEN new.raw_user_meta_data->>'role' = 'Adm' OR new.email = 'adm@empresa.com' THEN 'Adm'::public.user_role
       WHEN new.raw_user_meta_data->>'role' = 'Vendedor/Representante' THEN 'Vendedor/Representante'::public.user_role
+      WHEN new.raw_user_meta_data->>'role' = 'Gestor de Customer' THEN 'Gestor de Customer'::public.user_role
       ELSE 'Vendedor/Representante'::public.user_role
     END
   )

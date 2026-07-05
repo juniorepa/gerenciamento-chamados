@@ -14,6 +14,7 @@ export const LoginScreen: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
+  const [role, setRole] = useState('Vendedor/Representante');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,7 +39,7 @@ export const LoginScreen: React.FC = () => {
 
     if (isRegister) {
       // Supabase Sign Up
-      const { error: signUpErr } = await signUpWithSupabase(cleanEmail, password, name.trim());
+      const { error: signUpErr } = await signUpWithSupabase(cleanEmail, password, name.trim(), role);
       if (signUpErr) {
         setError(signUpErr);
         setLoading(false);
@@ -185,6 +186,30 @@ export const LoginScreen: React.FC = () => {
               />
             </div>
           </div>
+
+          {/* Perfil de Acesso input field (Apenas Cadastro) */}
+          {isRegister && (
+            <div>
+              <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2">
+                Perfil de Acesso
+              </label>
+              <div className="relative">
+                <select
+                  id="role-select"
+                  value={role}
+                  onChange={(e) => setRole(e.target.value)}
+                  className="w-full h-12 px-4 bg-[#f8fafc] border border-gray-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#00236f] focus:border-transparent focus:bg-white transition-all text-gray-800 appearance-none"
+                  required
+                >
+                  <option value="Vendedor/Representante">Vendedor/Representante</option>
+                  <option value="Gestor de Customer">Gestor de Customer</option>
+                </select>
+                <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+                  ▼
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Password input field */}
           <div>

@@ -4,7 +4,7 @@
 -- =====================================================================
 
 -- 1. CRIAR ENUM DE PAPÉIS (ROLES) E TABELA DE USUÁRIOS (PERFIS)
-CREATE TYPE public.user_role AS ENUM ('Vendedor/Representante', 'Customer', 'Adm');
+CREATE TYPE public.user_role AS ENUM ('Vendedor/Representante', 'Customer', 'Adm', 'Gestor de Customer');
 
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
@@ -87,6 +87,7 @@ BEGIN
     CASE 
       WHEN new.raw_user_meta_data->>'role' = 'Adm' OR new.email = 'adm@empresa.com' THEN 'Adm'::public.user_role
       WHEN new.raw_user_meta_data->>'role' = 'Vendedor/Representante' THEN 'Vendedor/Representante'::public.user_role
+      WHEN new.raw_user_meta_data->>'role' = 'Gestor de Customer' THEN 'Gestor de Customer'::public.user_role
       ELSE 'Vendedor/Representante'::public.user_role
     END
   )
