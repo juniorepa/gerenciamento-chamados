@@ -29,7 +29,7 @@ ALTER TABLE public.profiles
   );
 
 -- Definimos o novo valor padrão como 'Customer' do tipo ENUM
-ALTER TABLE public.profiles ALTER COLUMN role SET DEFAULT 'Customer'::public.user_role;
+ALTER TABLE public.profiles ALTER COLUMN role SET DEFAULT 'Vendedor/Representante'::public.user_role;
 
 -- 3. Atualizar a função do Trigger para usar o tipo ENUM corretamente
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -43,7 +43,7 @@ BEGIN
     CASE 
       WHEN new.raw_user_meta_data->>'role' = 'Adm' OR new.email = 'adm@empresa.com' THEN 'Adm'::public.user_role
       WHEN new.raw_user_meta_data->>'role' = 'Vendedor/Representante' THEN 'Vendedor/Representante'::public.user_role
-      ELSE 'Customer'::public.user_role
+      ELSE 'Vendedor/Representante'::public.user_role
     END
   )
   ON CONFLICT (id) DO UPDATE

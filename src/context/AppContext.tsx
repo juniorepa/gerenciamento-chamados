@@ -158,7 +158,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               role = 'ADM';
             }
           } else {
-            role = session.user.user_metadata?.role || 'Agente';
+            role = session.user.user_metadata?.role || 'Vendedor/Representante';
           }
 
           const appUser: User = {
@@ -213,7 +213,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             role = 'ADM';
           }
         } else {
-          role = session.user.user_metadata?.role || 'Agente';
+          role = session.user.user_metadata?.role || 'Vendedor/Representante';
         }
 
         const appUser: User = {
@@ -587,7 +587,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                       nameLower.includes('logistic') ||
                       nameLower.includes('adm');
 
-        let role = 'Customer';
+        let role = 'Vendedor/Representante';
         if (isAdm) {
           if (emailLower.includes('selante') || nameLower.includes('selante')) {
             role = 'Customer Selantes';
@@ -599,7 +599,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             role = 'ADM';
           }
         } else {
-          role = profile?.role || 'Customer';
+          role = profile?.role || 'Vendedor/Representante';
         }
 
         const appUser: User = {
@@ -663,7 +663,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                     emailLower.includes('logistica') || 
                     emailLower.includes('logistic');
 
-      let role = 'Customer';
+      let role = 'Vendedor/Representante';
       if (isAdm) {
         if (emailLower.includes('selante')) {
           role = 'Customer Selantes';

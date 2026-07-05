@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
   email TEXT NOT NULL,
   name TEXT,
-  role public.user_role DEFAULT 'Customer',
+  role public.user_role DEFAULT 'Vendedor/Representante',
   "avatarUrl" TEXT,
   "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
   "updatedAt" TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
@@ -87,7 +87,7 @@ BEGIN
     CASE 
       WHEN new.raw_user_meta_data->>'role' = 'Adm' OR new.email = 'adm@empresa.com' THEN 'Adm'::public.user_role
       WHEN new.raw_user_meta_data->>'role' = 'Vendedor/Representante' THEN 'Vendedor/Representante'::public.user_role
-      ELSE 'Customer'::public.user_role
+      ELSE 'Vendedor/Representante'::public.user_role
     END
   )
   ON CONFLICT (id) DO UPDATE
