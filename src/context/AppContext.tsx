@@ -677,7 +677,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       const { data, error } = await supabase.auth.signUp({
-        email,
+        email: emailLower,
         password,
         options: {
           data: {
@@ -695,7 +695,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { error: null };
     } catch (err: any) {
       console.error('Supabase Sign Up Error:', err);
-      return { error: err.message || err };
+      let errMsg = err.message || err;
+      if (typeof errMsg === 'string') {
+        const msgLower = errMsg.toLowerCase();
+        if (msgLower.includes('already registered') || msgLower.includes('user already exists')) {
+          errMsg = 'e-mail já cadastrado';
+        } else if (msgLower.includes('password should be at least')) {
+          errMsg = 'A senha deve conter no mínimo 6 caracteres.';
+        }
+      }
+      return { error: errMsg };
     }
   };
 

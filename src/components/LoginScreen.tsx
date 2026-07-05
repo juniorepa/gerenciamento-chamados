@@ -32,6 +32,10 @@ export const LoginScreen: React.FC = () => {
       setError('Por favor, preencha sua senha.');
       return;
     }
+    if (isRegister && password.length < 6) {
+      setError('A senha deve conter no mínimo 6 caracteres.');
+      return;
+    }
 
     setError('');
     setSuccess('');
