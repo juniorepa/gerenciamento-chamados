@@ -121,6 +121,7 @@ interface AppContextType {
   allProfiles: User[];
   fetchProfiles: () => Promise<void>;
   linkSellerToBackoffice: (sellerEmail: string, backofficeEmail: string | null) => Promise<void>;
+  updateUserRole: (email: string, role: string) => Promise<{ error: any }>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -194,39 +195,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const name = session.user.user_metadata?.name || session.user.user_metadata?.full_name || userEmail.split('@')[0];
           const emailLower = userEmail.toLowerCase().trim();
           const nameLower = name.toLowerCase().trim();
-          const isAdm = emailLower === 'adm@empresa.com' || 
-                        emailLower.startsWith('adm@') || 
-                        emailLower.includes('selante') || 
-                        emailLower.includes('argamassa') || 
-                        emailLower.includes('logistica') || 
-                        emailLower.includes('logistic') ||
-                        nameLower.includes('selante') ||
-                        nameLower.includes('argamassa') ||
-                        nameLower.includes('logistica') ||
-                        nameLower.includes('logistic') ||
-                        nameLower.includes('adm');
 
-          const isGestor = emailLower.includes('gestor') || 
-                           emailLower.includes('gerente') || 
-                           nameLower.includes('gestor') || 
-                           nameLower.includes('gerente') ||
-                           session.user.user_metadata?.role === 'Gestor de Backoffice';
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('role')
+            .eq('email', emailLower)
+            .maybeSingle();
 
-          let role = 'Customer';
-          if (isGestor) {
-            role = 'Gestor de Backoffice';
-          } else if (isAdm) {
-            if (emailLower.includes('selante') || nameLower.includes('selante')) {
-              role = 'Customer Selantes';
-            } else if (emailLower.includes('argamassa') || nameLower.includes('argamassa')) {
-              role = 'Customer Argamassa';
-            } else if (emailLower.includes('logistica') || emailLower.includes('logistic') || nameLower.includes('logistica') || nameLower.includes('logistic')) {
-              role = 'Customer Logística';
+          let role = profile?.role;
+
+          if (!role) {
+            const isAdm = emailLower === 'adm@empresa.com' || 
+                          emailLower.startsWith('adm@') || 
+                          emailLower.includes('selante') || 
+                          emailLower.includes('argamassa') || 
+                          emailLower.includes('logistica') || 
+                          emailLower.includes('logistic') ||
+                          nameLower.includes('selante') ||
+                          nameLower.includes('argamassa') ||
+                          nameLower.includes('logistica') ||
+                          nameLower.includes('logistic') ||
+                          nameLower.includes('adm');
+
+            const isGestor = emailLower.includes('gestor') || 
+                             emailLower.includes('gerente') || 
+                             nameLower.includes('gestor') || 
+                             nameLower.includes('gerente') ||
+                             session.user.user_metadata?.role === 'Gestor de Backoffice';
+
+            role = 'Customer';
+            if (isGestor) {
+              role = 'Gestor de Backoffice';
+            } else if (isAdm) {
+              if (emailLower.includes('selante') || nameLower.includes('selante')) {
+                role = 'Customer Selantes';
+              } else if (emailLower.includes('argamassa') || nameLower.includes('argamassa')) {
+                role = 'Customer Argamassa';
+              } else if (emailLower.includes('logistica') || emailLower.includes('logistic') || nameLower.includes('logistica') || nameLower.includes('logistic')) {
+                role = 'Customer Logística';
+              } else {
+                role = 'ADM';
+              }
             } else {
-              role = 'ADM';
+              role = session.user.user_metadata?.role || 'Agente';
             }
-          } else {
-            role = session.user.user_metadata?.role || 'Agente';
           }
 
           const appUser: User = {
@@ -268,39 +280,50 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const name = session.user.user_metadata?.name || session.user.user_metadata?.full_name || userEmail.split('@')[0];
         const emailLower = userEmail.toLowerCase().trim();
         const nameLower = name.toLowerCase().trim();
-        const isAdm = emailLower === 'adm@empresa.com' || 
-                      emailLower.startsWith('adm@') || 
-                      emailLower.includes('selante') || 
-                      emailLower.includes('argamassa') || 
-                      emailLower.includes('logistica') || 
-                      emailLower.includes('logistic') ||
-                      nameLower.includes('selante') ||
-                      nameLower.includes('argamassa') ||
-                      nameLower.includes('logistica') ||
-                      nameLower.includes('logistic') ||
-                      nameLower.includes('adm');
 
-        const isGestor = emailLower.includes('gestor') || 
-                         emailLower.includes('gerente') || 
-                         nameLower.includes('gestor') || 
-                         nameLower.includes('gerente') ||
-                         session.user.user_metadata?.role === 'Gestor de Backoffice';
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('email', emailLower)
+          .maybeSingle();
 
-        let role = 'Customer';
-        if (isGestor) {
-          role = 'Gestor de Backoffice';
-        } else if (isAdm) {
-          if (emailLower.includes('selante') || nameLower.includes('selante')) {
-            role = 'Customer Selantes';
-          } else if (emailLower.includes('argamassa') || nameLower.includes('argamassa')) {
-            role = 'Customer Argamassa';
-          } else if (emailLower.includes('logistica') || emailLower.includes('logistic') || nameLower.includes('logistica') || nameLower.includes('logistic')) {
-            role = 'Customer Logística';
+        let role = profile?.role;
+
+        if (!role) {
+          const isAdm = emailLower === 'adm@empresa.com' || 
+                        emailLower.startsWith('adm@') || 
+                        emailLower.includes('selante') || 
+                        emailLower.includes('argamassa') || 
+                        emailLower.includes('logistica') || 
+                        emailLower.includes('logistic') ||
+                        nameLower.includes('selante') ||
+                        nameLower.includes('argamassa') ||
+                        nameLower.includes('logistica') ||
+                        nameLower.includes('logistic') ||
+                        nameLower.includes('adm');
+
+          const isGestor = emailLower.includes('gestor') || 
+                           emailLower.includes('gerente') || 
+                           nameLower.includes('gestor') || 
+                           nameLower.includes('gerente') ||
+                           session.user.user_metadata?.role === 'Gestor de Backoffice';
+
+          role = 'Customer';
+          if (isGestor) {
+            role = 'Gestor de Backoffice';
+          } else if (isAdm) {
+            if (emailLower.includes('selante') || nameLower.includes('selante')) {
+              role = 'Customer Selantes';
+            } else if (emailLower.includes('argamassa') || nameLower.includes('argamassa')) {
+              role = 'Customer Argamassa';
+            } else if (emailLower.includes('logistica') || emailLower.includes('logistic') || nameLower.includes('logistica') || nameLower.includes('logistic')) {
+              role = 'Customer Logística';
+            } else {
+              role = 'ADM';
+            }
           } else {
-            role = 'ADM';
+            role = session.user.user_metadata?.role || 'Agente';
           }
-        } else {
-          role = session.user.user_metadata?.role || 'Agente';
         }
 
         const appUser: User = {
@@ -379,39 +402,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const mappedProfiles: User[] = (data || [])
         .filter((p: any) => p && typeof p.email === 'string')
         .map((p: any) => {
-          let mappedRole = p.role || 'Customer';
+          let mappedRole = p.role;
           const emailLower = p.email?.toLowerCase().trim() || '';
           const nameLower = (p.name || '').toLowerCase().trim();
           
-          const isGestor = emailLower.includes('gestor') || 
-                           emailLower.includes('gerente') || 
-                           nameLower.includes('gestor') || 
-                           nameLower.includes('gerente') ||
-                           p.role === 'Gestor de Backoffice';
+          if (!mappedRole) {
+            const isGestor = emailLower.includes('gestor') || 
+                             emailLower.includes('gerente') || 
+                             nameLower.includes('gestor') || 
+                             nameLower.includes('gerente');
 
-          const isAdm = emailLower === 'adm@empresa.com' || 
-                        emailLower.startsWith('adm@') || 
-                        emailLower.includes('selante') || 
-                        emailLower.includes('argamassa') || 
-                        emailLower.includes('logistica') || 
-                        emailLower.includes('logistic') ||
-                        nameLower.includes('selante') ||
-                        nameLower.includes('argamassa') ||
-                        nameLower.includes('logistica') ||
-                        nameLower.includes('logistic') ||
-                        nameLower.includes('adm');
+            const isAdm = emailLower === 'adm@empresa.com' || 
+                          emailLower.startsWith('adm@') || 
+                          emailLower.includes('selante') || 
+                          emailLower.includes('argamassa') || 
+                          emailLower.includes('logistica') || 
+                          emailLower.includes('logistic') ||
+                          nameLower.includes('selante') ||
+                          nameLower.includes('argamassa') ||
+                          nameLower.includes('logistica') ||
+                          nameLower.includes('logistic') ||
+                          nameLower.includes('adm');
 
-          if (isGestor) {
-            mappedRole = 'Gestor de Backoffice';
-          } else if (isAdm && mappedRole === 'Customer') {
-            if (emailLower.includes('selante') || nameLower.includes('selante')) {
-              mappedRole = 'Customer Selantes';
-            } else if (emailLower.includes('argamassa') || nameLower.includes('argamassa')) {
-              mappedRole = 'Customer Argamassa';
-            } else if (emailLower.includes('logistica') || emailLower.includes('logistic') || nameLower.includes('logistica') || nameLower.includes('logistic')) {
-              mappedRole = 'Customer Logística';
+            if (isGestor) {
+              mappedRole = 'Gestor de Backoffice';
+            } else if (isAdm) {
+              if (emailLower.includes('selante') || nameLower.includes('selante')) {
+                mappedRole = 'Customer Selantes';
+              } else if (emailLower.includes('argamassa') || nameLower.includes('argamassa')) {
+                mappedRole = 'Customer Argamassa';
+              } else if (emailLower.includes('logistica') || emailLower.includes('logistic') || nameLower.includes('logistica') || nameLower.includes('logistic')) {
+                mappedRole = 'Customer Logística';
+              } else {
+                mappedRole = 'ADM';
+              }
             } else {
-              mappedRole = 'ADM';
+              mappedRole = 'Customer';
             }
           }
 
@@ -477,6 +503,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     localStorage.setItem('reliant_backoffice_seller_relations', JSON.stringify(localRelations));
 
     await fetchProfiles();
+  };
+
+  const updateUserRole = async (email: string, role: string) => {
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ role: role })
+        .eq('email', email.toLowerCase().trim());
+        
+      if (error) throw error;
+      
+      // Update local profiles list state
+      setAllProfiles(prev => prev.map(p => 
+        p.email.toLowerCase().trim() === email.toLowerCase().trim() 
+          ? { ...p, role: role } 
+          : p
+      ));
+      
+      return { error: null };
+    } catch (err: any) {
+      console.error('Error updating user role:', err);
+      return { error: getErrorMessage(err) };
+    }
   };
 
   useEffect(() => {
@@ -1532,7 +1581,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         clearAllNotifications,
         allProfiles,
         fetchProfiles,
-        linkSellerToBackoffice
+        linkSellerToBackoffice,
+        updateUserRole
       }}
     >
       {children}

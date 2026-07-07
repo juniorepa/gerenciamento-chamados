@@ -50,7 +50,8 @@ export const DashboardScreen: React.FC = () => {
     regionFilter,
     setRegionFilter,
     allProfiles,
-    linkSellerToBackoffice
+    linkSellerToBackoffice,
+    updateUserRole
   } = useApp();
 
   const [filterMySellers, setFilterMySellers] = useState<boolean>(() => {
@@ -68,6 +69,7 @@ export const DashboardScreen: React.FC = () => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [showSellersPanel, setShowSellersPanel] = useState(false);
+  const [showRolesPanel, setShowRolesPanel] = useState(false);
   const [sellerToLink, setSellerToLink] = useState('');
   const [linkingLoading, setLinkingLoading] = useState(false);
 
@@ -760,71 +762,159 @@ export const DashboardScreen: React.FC = () => {
 
           if (isBackoffice) {
             return (
-              <div className="bg-white border border-gray-150 rounded-[18px] p-4 shadow-sm space-y-3">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-[#00236f]">
-                      <Users className="w-4 h-4" />
+              <div className="space-y-4">
+                <div className="bg-white border border-gray-150 rounded-[18px] p-4 shadow-sm space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-[#00236f]">
+                        <Users className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-[#00236f] flex items-center gap-1.5">
+                          Seus Vendedores Vinculados
+                          <span className="text-[10px] font-black bg-blue-100 text-[#00236f] px-2 py-0.5 rounded-full">
+                            {myLinkedSellersList.length}
+                          </span>
+                        </h4>
+                        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
+                          Designados pelo Gestor • {currentUser?.role}
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <h4 className="font-bold text-sm text-[#00236f] flex items-center gap-1.5">
-                        Seus Vendedores Vinculados
-                        <span className="text-[10px] font-black bg-blue-100 text-[#00236f] px-2 py-0.5 rounded-full">
-                          {myLinkedSellersList.length}
-                        </span>
-                      </h4>
-                      <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
-                        Designados pelo Gestor • {currentUser?.role}
-                      </p>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                        <span className="text-[11px] font-bold text-gray-500">Apenas meus vendedores:</span>
+                        <input 
+                          type="checkbox" 
+                          checked={filterMySellers} 
+                          onChange={(e) => handleToggleFilterMySellers(e.target.checked)}
+                          className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
+                        />
+                      </label>
+                      
+                      <button 
+                        onClick={() => setShowSellersPanel(!showSellersPanel)}
+                        className="text-xs font-bold text-[#00236f] hover:text-[#001c56] bg-blue-50/70 px-2.5 py-1 rounded-lg hover:bg-blue-100/50 transition-all active:scale-95"
+                      >
+                        {showSellersPanel ? 'Fechar' : 'Ver Vendedores'}
+                      </button>
                     </div>
                   </div>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                      <span className="text-[11px] font-bold text-gray-500">Apenas meus vendedores:</span>
-                      <input 
-                        type="checkbox" 
-                        checked={filterMySellers} 
-                        onChange={(e) => handleToggleFilterMySellers(e.target.checked)}
-                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
-                      />
-                    </label>
-                    
-                    <button 
-                      onClick={() => setShowSellersPanel(!showSellersPanel)}
-                      className="text-xs font-bold text-[#00236f] hover:text-[#001c56] bg-blue-50/70 px-2.5 py-1 rounded-lg hover:bg-blue-100/50 transition-all active:scale-95"
+
+                  {showSellersPanel && (
+                    <motion.div 
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      className="pt-2 border-t border-gray-100 space-y-3"
                     >
-                      {showSellersPanel ? 'Fechar' : 'Ver Vendedores'}
-                    </button>
-                  </div>
+                      <div>
+                        <p className="text-[11px] font-extrabold text-gray-400 uppercase tracking-wider mb-1.5">Vendedores sob seus cuidados:</p>
+                        {myLinkedSellersList.length === 0 ? (
+                          <p className="text-xs text-gray-500 bg-gray-50/50 p-2.5 rounded-xl text-center font-medium italic">
+                            Nenhum vendedor vinculado a você pelo Gestor de Backoffice ainda.
+                          </p>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {myLinkedSellersList.map(s => (
+                              <div key={s.email} className="flex items-center justify-between p-2 rounded-xl bg-gray-50 border border-gray-100">
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-xs font-bold text-gray-800 truncate">{s.name}</p>
+                                  <p className="text-[10px] text-gray-400 truncate">{s.email}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
                 </div>
 
-                {showSellersPanel && (
-                  <motion.div 
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    className="pt-2 border-t border-gray-100 space-y-3"
-                  >
-                    <div>
-                      <p className="text-[11px] font-extrabold text-gray-400 uppercase tracking-wider mb-1.5">Vendedores sob seus cuidados:</p>
-                      {myLinkedSellersList.length === 0 ? (
-                        <p className="text-xs text-gray-500 bg-gray-50/50 p-2.5 rounded-xl text-center font-medium italic">
-                          Nenhum vendedor vinculado a você pelo Gestor de Backoffice ainda.
+                {/* Gestão de Perfis e Papéis (Apenas ADM) */}
+                <div className="bg-white border border-gray-150 rounded-[18px] p-4 shadow-sm space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 pb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600">
+                        <SlidersHorizontal className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-[#00236f] flex items-center gap-1.5">
+                          Gestão de Perfis e Papéis
+                          <span className="text-[10px] font-black bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full">
+                            {allProfiles.length} Usuários
+                          </span>
+                        </h4>
+                        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
+                          Administração de Acessos
                         </p>
-                      ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          {myLinkedSellersList.map(s => (
-                            <div key={s.email} className="flex items-center justify-between p-2 rounded-xl bg-gray-50 border border-gray-100">
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => setShowRolesPanel(!showRolesPanel)}
+                      className="text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-lg transition-all active:scale-95"
+                    >
+                      {showRolesPanel ? 'Fechar Painel' : 'Gerenciar Papéis'}
+                    </button>
+                  </div>
+
+                  {showRolesPanel && (
+                    <motion.div 
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      className="space-y-3"
+                    >
+                      <p className="text-xs text-gray-500 font-medium leading-relaxed">
+                        Como <strong>ADM</strong>, você possui permissão para alterar o papel de qualquer usuário no sistema. As alterações surtirão efeito imediatamente no banco de dados.
+                      </p>
+
+                      <div className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
+                        {allProfiles.filter(p => p.email !== currentUser?.email).map(profile => {
+                          const currentRole = profile.role || 'Customer';
+                          return (
+                            <div 
+                              key={profile.email} 
+                              className="flex flex-col md:flex-row md:items-center justify-between p-3 rounded-xl bg-gray-50 border border-gray-100 gap-3 hover:bg-gray-100/50 transition-colors"
+                            >
                               <div className="min-w-0 flex-1">
-                                <p className="text-xs font-bold text-gray-800 truncate">{s.name}</p>
-                                <p className="text-[10px] text-gray-400 truncate">{s.email}</p>
+                                <span className="text-xs font-bold text-gray-800 truncate block">{profile.name}</span>
+                                <span className="text-[10px] text-gray-400 truncate block">{profile.email}</span>
+                                <span className="inline-flex items-center gap-1 text-[9px] font-black bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded-full mt-1">
+                                  Papel Atual: {currentRole}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-2 shrink-0">
+                                <select 
+                                  value={currentRole}
+                                  onChange={async (e) => {
+                                    const nextRole = e.target.value;
+                                    if (confirm(`Deseja alterar o papel de ${profile.name} para "${nextRole}"?`)) {
+                                      const res = await updateUserRole(profile.email, nextRole);
+                                      if (res?.error) {
+                                        alert(`Erro ao atualizar papel: ${res.error}`);
+                                      } else {
+                                        alert(`Papel de ${profile.name} atualizado com sucesso!`);
+                                      }
+                                    }
+                                  }}
+                                  className="bg-white border border-gray-200 rounded-lg text-xs p-1.5 focus:ring-1 focus:ring-blue-500 focus:outline-none min-w-[180px] max-w-[240px]"
+                                >
+                                  <option value="Customer">Customer (Vendedor)</option>
+                                  <option value="Backoffice">Backoffice (Analista Geral)</option>
+                                  <option value="Customer Selantes">Customer Selantes (Analista)</option>
+                                  <option value="Customer Argamassa">Customer Argamassa (Analista)</option>
+                                  <option value="Customer Logística">Customer Logística (Analista)</option>
+                                  <option value="ADM">ADM (Administrador)</option>
+                                  <option value="Gestor de Backoffice">Gestor de Backoffice</option>
+                                </select>
                               </div>
                             </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </motion.div>
-                )}
+                          );
+                        })}
+                      </div>
+                    </motion.div>
+                  )}
+                </div>
               </div>
             );
           }
