@@ -51,6 +51,7 @@ export const DashboardScreen: React.FC = () => {
     setRegionFilter,
     allProfiles,
     linkSellerToBackoffice,
+    unlinkSellerFromBackoffice,
     updateUserRole
   } = useApp();
 
@@ -156,8 +157,12 @@ export const DashboardScreen: React.FC = () => {
 
   // Find sellers linked to the current logged-in Backoffice user
   const linkedSellers = allProfiles
-    .filter(p => p && p.backoffice_email && p.email && p.backoffice_email.toLowerCase().trim() === currentUser?.email?.toLowerCase().trim())
-    .map(p => p.email ? p.email.toLowerCase().trim() : '')
+    .filter(p => {
+      if (!p || !p.email) return false;
+      const emails = p.backoffice_emails || (p.backoffice_email ? [p.backoffice_email] : []);
+      return emails.some(e => e.toLowerCase().trim() === currentUser?.email?.toLowerCase().trim());
+    })
+    .map(p => p.email.toLowerCase().trim())
     .filter(Boolean);
 
   // Role-based visibility: Common users see only their own, backoffice sees linked or all based on filter
@@ -681,13 +686,7 @@ export const DashboardScreen: React.FC = () => {
                         </p>
                       ) : (
                         allSellers.map(seller => {
-                          const linkedEmail = seller.backoffice_email || '';
-                          const selectedValue = gestorSelections[seller.email] !== undefined 
-                            ? gestorSelections[seller.email] 
-                            : linkedEmail;
-                          const handler = linkedEmail 
-                            ? allBackoffices.find(b => b.email.toLowerCase().trim() === linkedEmail.toLowerCase().trim()) 
-                            : null;
+                          const linkedEmails = seller.backoffice_emails || (seller.backoffice_email ? [seller.backoffice_email] : []);
 
                           return (
                             <div 
@@ -697,9 +696,9 @@ export const DashboardScreen: React.FC = () => {
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-1.5">
                                   <span className="text-xs font-bold text-gray-800 truncate">{seller.name}</span>
-                                  {linkedEmail ? (
+                                  {linkedEmails.length > 0 ? (
                                     <span className="inline-flex items-center gap-0.5 text-[9px] font-black bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded-full">
-                                      Vinculado
+                                      Vinculado ({linkedEmails.length})
                                     </span>
                                   ) : (
                                     <span className="inline-flex items-center gap-0.5 text-[9px] font-black bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full">
@@ -708,46 +707,60 @@ export const DashboardScreen: React.FC = () => {
                                   )}
                                 </div>
                                 <p className="text-[10px] text-gray-400 truncate">{seller.email}</p>
-                                {handler && (
-                                  <p className="text-[10px] text-emerald-600 font-bold mt-0.5 truncate">
-                                    Atendido por: {handler.name} ({handler.email})
-                                  </p>
-                                )}
+                                
+                                {/* List of currently linked backoffice agents */}
+                                <div className="flex flex-wrap gap-1 mt-1.5">
+                                  {linkedEmails.map(email => {
+                                    const bo = allBackoffices.find(b => b.email.toLowerCase().trim() === email.toLowerCase().trim());
+                                    return (
+                                      <span 
+                                        key={email} 
+                                        className="inline-flex items-center gap-1 text-[9px] font-bold bg-[#00236f]/5 text-[#00236f] px-2 py-0.5 rounded-full border border-[#00236f]/10"
+                                      >
+                                        <span>{bo?.name || email.split('@')[0]}</span>
+                                        <button 
+                                          onClick={async () => {
+                                            if (confirm(`Remover vínculo do analista ${bo?.name || email} com o vendedor ${seller.name}?`)) {
+                                              setLinkingLoading(true);
+                                              await unlinkSellerFromBackoffice(seller.email, email);
+                                              setLinkingLoading(false);
+                                            }
+                                          }}
+                                          disabled={linkingLoading}
+                                          className="text-red-500 hover:text-red-700 transition-colors font-black text-xs ml-0.5 cursor-pointer leading-none"
+                                          title="Remover analista"
+                                        >
+                                          ×
+                                        </button>
+                                      </span>
+                                    );
+                                  })}
+                                </div>
                               </div>
 
                               <div className="flex items-center gap-2 shrink-0">
                                 <select 
-                                  value={selectedValue}
-                                  onChange={(e) => {
-                                    setGestorSelections(prev => ({
-                                      ...prev,
-                                      [seller.email]: e.target.value
-                                    }));
-                                  }}
-                                  className="bg-white border border-gray-200 rounded-lg text-xs p-1.5 focus:ring-1 focus:ring-blue-500 focus:outline-none min-w-[180px] max-w-[240px]"
-                                >
-                                  <option value="">-- Sem Vínculo --</option>
-                                  {allBackoffices.map(b => (
-                                    <option key={b.email} value={b.email}>
-                                      {b.name} ({b.email})
-                                    </option>
-                                  ))}
-                                </select>
-
-                                <button 
-                                  onClick={async () => {
-                                    setLinkingLoading(true);
-                                    const nextBackoffice = selectedValue || null;
-                                    await linkSellerToBackoffice(seller.email, nextBackoffice);
-                                    setLinkingLoading(false);
+                                  value=""
+                                  onChange={async (e) => {
+                                    const nextBackoffice = e.target.value;
+                                    if (nextBackoffice) {
+                                      setLinkingLoading(true);
+                                      await linkSellerToBackoffice(seller.email, nextBackoffice);
+                                      setLinkingLoading(false);
+                                    }
                                   }}
                                   disabled={linkingLoading}
-                                  className="bg-[#00236f] hover:bg-[#001c56] disabled:bg-gray-200 text-white font-bold text-xs px-3 py-2 rounded-lg transition-all flex items-center gap-1 shadow-sm"
-                                  title="Salvar Vinculação"
+                                  className="bg-white border border-gray-200 rounded-lg text-xs p-1.5 focus:ring-1 focus:ring-blue-500 focus:outline-none min-w-[200px]"
                                 >
-                                  <Check className="w-3.5 h-3.5" />
-                                  <span>Salvar</span>
-                                </button>
+                                  <option value="">+ Vincular Analista...</option>
+                                  {allBackoffices
+                                    .filter(b => !linkedEmails.some(e => e.toLowerCase().trim() === b.email.toLowerCase().trim()))
+                                    .map(b => (
+                                      <option key={b.email} value={b.email}>
+                                        {b.name} ({b.email})
+                                      </option>
+                                    ))}
+                                </select>
                               </div>
                             </div>
                           );

@@ -120,7 +120,8 @@ interface AppContextType {
   clearAllNotifications: () => void;
   allProfiles: User[];
   fetchProfiles: () => Promise<void>;
-  linkSellerToBackoffice: (sellerEmail: string, backofficeEmail: string | null) => Promise<void>;
+  linkSellerToBackoffice: (sellerEmail: string, backofficeEmail: string) => Promise<void>;
+  unlinkSellerFromBackoffice: (sellerEmail: string, backofficeEmail: string) => Promise<void>;
   updateUserRole: (email: string, role: string) => Promise<{ error: any }>;
 }
 
@@ -378,7 +379,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const fetchProfiles = async () => {
     try {
       // Try to fetch relations from Supabase's separate linking table
-      let relationsMap: Record<string, string> = {};
+      let relationsMap: Record<string, string[]> = {};
       try {
         const { data: relationsData, error: relationsError } = await supabase
           .from('backoffice_seller_relations')
@@ -386,7 +387,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (!relationsError && relationsData) {
           relationsData.forEach((rel: any) => {
             if (rel.seller_email && rel.backoffice_email) {
-              relationsMap[rel.seller_email.toLowerCase().trim()] = rel.backoffice_email.toLowerCase().trim();
+              const sEmail = rel.seller_email.toLowerCase().trim();
+              const bEmail = rel.backoffice_email.toLowerCase().trim();
+              if (!relationsMap[sEmail]) {
+                relationsMap[sEmail] = [];
+              }
+              if (!relationsMap[sEmail].includes(bEmail)) {
+                relationsMap[sEmail].push(bEmail);
+              }
             }
           });
         } else {
@@ -451,12 +459,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
           const emailKey = p.email?.toLowerCase().trim() || '';
           const defaultName = p.email ? p.email.split('@')[0] : 'Usuário';
+
+          // Get backoffice emails from relationsMap, profiles column, or localRelations fallback
+          let linkedEmails: string[] = relationsMap[emailKey] || [];
+          if (linkedEmails.length === 0) {
+            if (p.backoffice_email) {
+              linkedEmails.push(p.backoffice_email.toLowerCase().trim());
+            }
+            const localRel = localRelations[emailKey];
+            if (localRel) {
+              const localArr = Array.isArray(localRel) ? localRel : [localRel];
+              localArr.forEach((email: string) => {
+                const cleaned = email.toLowerCase().trim();
+                if (!linkedEmails.includes(cleaned)) {
+                  linkedEmails.push(cleaned);
+                }
+              });
+            }
+          }
+
           return {
             email: p.email,
             name: p.name || defaultName,
             role: mappedRole,
             avatarUrl: p.avatarUrl || DEFAULT_USER.avatarUrl,
-            backoffice_email: relationsMap[emailKey] || p.backoffice_email || localRelations[emailKey] || undefined
+            backoffice_email: linkedEmails[0] || undefined, // legacy support
+            backoffice_emails: linkedEmails
           };
         });
 
@@ -466,33 +494,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const linkSellerToBackoffice = async (sellerEmail: string, backofficeEmail: string | null) => {
+  const linkSellerToBackoffice = async (sellerEmail: string, backofficeEmail: string) => {
     const sEmail = sellerEmail.toLowerCase().trim();
-    const bEmail = backofficeEmail ? backofficeEmail.toLowerCase().trim() : null;
+    const bEmail = backofficeEmail.toLowerCase().trim();
 
     try {
-      // 1. Try to save to the separate linking table
-      if (bEmail) {
-        const { error: relError } = await supabase
-          .from('backoffice_seller_relations')
-          .upsert({ seller_email: sEmail, backoffice_email: bEmail }, { onConflict: 'seller_email' });
-        if (relError) {
-          console.warn('Relations table update failed:', relError);
-        }
-      } else {
-        const { error: relError } = await supabase
-          .from('backoffice_seller_relations')
-          .delete()
-          .eq('seller_email', sEmail);
-        if (relError) {
-          console.warn('Relations table delete failed:', relError);
-        }
+      // 1. Save to the separate linking table
+      const { error: relError } = await supabase
+        .from('backoffice_seller_relations')
+        .upsert({ seller_email: sEmail, backoffice_email: bEmail }, { onConflict: 'seller_email,backoffice_email' });
+      if (relError) {
+        console.warn('Relations table update failed:', relError);
       }
 
       // 2. Also save to profiles table for backwards-compatibility fallback
+      const { data: relations } = await supabase
+        .from('backoffice_seller_relations')
+        .select('backoffice_email')
+        .eq('seller_email', sEmail);
+
+      const firstEmail = relations && relations.length > 0 ? relations[0].backoffice_email : bEmail;
+
       const { error } = await supabase
         .from('profiles')
-        .update({ backoffice_email: bEmail })
+        .update({ backoffice_email: firstEmail })
         .eq('email', sEmail);
 
       if (error) {
@@ -503,10 +528,63 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     const localRelations = JSON.parse(localStorage.getItem('reliant_backoffice_seller_relations') || '{}');
-    if (bEmail) {
-      localRelations[sEmail] = bEmail;
-    } else {
-      delete localRelations[sEmail];
+    if (!localRelations[sEmail]) {
+      localRelations[sEmail] = [];
+    }
+    const arr = Array.isArray(localRelations[sEmail]) ? localRelations[sEmail] : [localRelations[sEmail]];
+    if (!arr.includes(bEmail)) {
+      arr.push(bEmail);
+    }
+    localRelations[sEmail] = arr;
+    localStorage.setItem('reliant_backoffice_seller_relations', JSON.stringify(localRelations));
+
+    await fetchProfiles();
+  };
+
+  const unlinkSellerFromBackoffice = async (sellerEmail: string, backofficeEmail: string) => {
+    const sEmail = sellerEmail.toLowerCase().trim();
+    const bEmail = backofficeEmail.toLowerCase().trim();
+
+    try {
+      // 1. Delete from database
+      const { error: relError } = await supabase
+        .from('backoffice_seller_relations')
+        .delete()
+        .eq('seller_email', sEmail)
+        .eq('backoffice_email', bEmail);
+      if (relError) {
+        console.warn('Relations table delete failed:', relError);
+      }
+
+      // 2. Update profiles table backwards-compatibility fallback
+      const { data: relations } = await supabase
+        .from('backoffice_seller_relations')
+        .select('backoffice_email')
+        .eq('seller_email', sEmail);
+
+      const nextEmail = relations && relations.length > 0 ? relations[0].backoffice_email : null;
+
+      const { error } = await supabase
+        .from('profiles')
+        .update({ backoffice_email: nextEmail })
+        .eq('email', sEmail);
+
+      if (error) {
+        console.warn('Database error while updating profile column:', error);
+      }
+    } catch (dbErr) {
+      console.warn('Database error while unlinking seller:', dbErr);
+    }
+
+    const localRelations = JSON.parse(localStorage.getItem('reliant_backoffice_seller_relations') || '{}');
+    if (localRelations[sEmail]) {
+      const arr = Array.isArray(localRelations[sEmail]) ? localRelations[sEmail] : [localRelations[sEmail]];
+      const updated = arr.filter((e: string) => e.toLowerCase().trim() !== bEmail);
+      if (updated.length > 0) {
+        localRelations[sEmail] = updated;
+      } else {
+        delete localRelations[sEmail];
+      }
     }
     localStorage.setItem('reliant_backoffice_seller_relations', JSON.stringify(localRelations));
 
@@ -1697,6 +1775,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         allProfiles,
         fetchProfiles,
         linkSellerToBackoffice,
+        unlinkSellerFromBackoffice,
         updateUserRole
       }}
     >
