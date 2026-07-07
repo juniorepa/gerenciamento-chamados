@@ -270,89 +270,97 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     checkSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      const isRecovering = checkRecovery() || event === 'PASSWORD_RECOVERY';
-      if (event === 'PASSWORD_RECOVERY') {
-        localStorage.setItem('is_recovering_password', 'true');
-      }
+      try {
+        const isRecovering = checkRecovery() || event === 'PASSWORD_RECOVERY';
+        if (event === 'PASSWORD_RECOVERY') {
+          localStorage.setItem('is_recovering_password', 'true');
+        }
 
-      if (session?.user) {
-        const userEmail = session.user.email || '';
-        const name = session.user.user_metadata?.name || session.user.user_metadata?.full_name || userEmail.split('@')[0];
-        const emailLower = userEmail.toLowerCase().trim();
-        const nameLower = name.toLowerCase().trim();
+        if (session?.user) {
+          const userEmail = session.user.email || '';
+          const name = session.user.user_metadata?.name || session.user.user_metadata?.full_name || userEmail.split('@')[0];
+          const emailLower = userEmail.toLowerCase().trim();
+          const nameLower = name.toLowerCase().trim();
 
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('email', emailLower)
-          .maybeSingle();
+          let role = 'Customer';
+          try {
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('role')
+              .eq('email', emailLower)
+              .maybeSingle();
 
-        let role = profile?.role;
-
-        if (!role) {
-          const isAdm = emailLower === 'adm@empresa.com' || 
-                        emailLower.startsWith('adm@') || 
-                        emailLower.includes('selante') || 
-                        emailLower.includes('argamassa') || 
-                        emailLower.includes('logistica') || 
-                        emailLower.includes('logistic') ||
-                        nameLower.includes('selante') ||
-                        nameLower.includes('argamassa') ||
-                        nameLower.includes('logistica') ||
-                        nameLower.includes('logistic') ||
-                        nameLower.includes('adm');
-
-          const isGestor = emailLower.includes('gestor') || 
-                           emailLower.includes('gerente') || 
-                           nameLower.includes('gestor') || 
-                           nameLower.includes('gerente') ||
-                           session.user.user_metadata?.role === 'Gestor de Backoffice';
-
-          role = 'Customer';
-          if (isGestor) {
-            role = 'Gestor de Backoffice';
-          } else if (isAdm) {
-            if (emailLower.includes('selante') || nameLower.includes('selante')) {
-              role = 'Customer Selantes';
-            } else if (emailLower.includes('argamassa') || nameLower.includes('argamassa')) {
-              role = 'Customer Argamassa';
-            } else if (emailLower.includes('logistica') || emailLower.includes('logistic') || nameLower.includes('logistica') || nameLower.includes('logistic')) {
-              role = 'Customer Logística';
+            if (profile?.role) {
+              role = profile.role;
             } else {
-              role = 'ADM';
+              const isAdm = emailLower === 'adm@empresa.com' || 
+                            emailLower.startsWith('adm@') || 
+                            emailLower.includes('selante') || 
+                            emailLower.includes('argamassa') || 
+                            emailLower.includes('logistica') || 
+                            emailLower.includes('logistic') ||
+                            nameLower.includes('selante') ||
+                            nameLower.includes('argamassa') ||
+                            nameLower.includes('logistica') ||
+                            nameLower.includes('logistic') ||
+                            nameLower.includes('adm');
+
+              const isGestor = emailLower.includes('gestor') || 
+                               emailLower.includes('gerente') || 
+                               nameLower.includes('gestor') || 
+                               nameLower.includes('gerente') ||
+                               session.user.user_metadata?.role === 'Gestor de Backoffice';
+
+              if (isGestor) {
+                role = 'Gestor de Backoffice';
+              } else if (isAdm) {
+                if (emailLower.includes('selante') || nameLower.includes('selante')) {
+                  role = 'Customer Selantes';
+                } else if (emailLower.includes('argamassa') || nameLower.includes('argamassa')) {
+                  role = 'Customer Argamassa';
+                } else if (emailLower.includes('logistica') || emailLower.includes('logistic') || nameLower.includes('logistica') || nameLower.includes('logistic')) {
+                  role = 'Customer Logística';
+                } else {
+                  role = 'ADM';
+                }
+              } else {
+                role = session.user.user_metadata?.role || 'Agente';
+              }
             }
+          } catch (profileErr) {
+            console.warn('Failed to fetch profile in onAuthStateChange:', profileErr);
+          }
+
+          const appUser: User = {
+            email: userEmail,
+            name: name,
+            role: role,
+            avatarUrl: session.user.user_metadata?.avatar_url || DEFAULT_USER.avatarUrl
+          };
+          setCurrentUser(appUser);
+          localStorage.setItem('reliant_user', JSON.stringify(appUser));
+          if (isRecovering) {
+            setActiveScreen('reset-password');
           } else {
-            role = session.user.user_metadata?.role || 'Agente';
+            setActiveScreen(prev => {
+              if (prev === 'login' || prev === 'reset-password') {
+                const storedScreen = localStorage.getItem('reliant_active_screen');
+                return (storedScreen as ScreenType) || 'dashboard';
+              }
+              return prev;
+            });
+          }
+        } else {
+          if (event === 'SIGNED_OUT') {
+            setCurrentUser(null);
+            localStorage.removeItem('reliant_user');
+            localStorage.removeItem('reliant_active_screen');
+            localStorage.removeItem('reliant_selected_ticket_id');
+            setActiveScreen('login');
           }
         }
-
-        const appUser: User = {
-          email: userEmail,
-          name: name,
-          role: role,
-          avatarUrl: session.user.user_metadata?.avatar_url || DEFAULT_USER.avatarUrl
-        };
-        setCurrentUser(appUser);
-        localStorage.setItem('reliant_user', JSON.stringify(appUser));
-        if (isRecovering) {
-          setActiveScreen('reset-password');
-        } else {
-          setActiveScreen(prev => {
-            if (prev === 'login' || prev === 'reset-password') {
-              const storedScreen = localStorage.getItem('reliant_active_screen');
-              return (storedScreen as ScreenType) || 'dashboard';
-            }
-            return prev;
-          });
-        }
-      } else {
-        if (event === 'SIGNED_OUT') {
-          setCurrentUser(null);
-          localStorage.removeItem('reliant_user');
-          localStorage.removeItem('reliant_active_screen');
-          localStorage.removeItem('reliant_selected_ticket_id');
-          setActiveScreen('login');
-        }
+      } catch (err) {
+        console.error('Error in onAuthStateChange callback:', err);
       }
     });
 
@@ -855,6 +863,75 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           .from('profiles')
           .upsert({ email: cleanEmail, name: name.trim() }, { onConflict: 'email' });
       }
+
+      // Automatically set the session user and transition screen
+      const session = data.session;
+      if (session?.user) {
+        const userEmail = session.user.email || '';
+        const nameVal = session.user.user_metadata?.name || session.user.user_metadata?.full_name || userEmail.split('@')[0];
+        const emailLower = userEmail.toLowerCase().trim();
+        const nameLower = nameVal.toLowerCase().trim();
+
+        let role = 'Customer';
+        try {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('role')
+            .eq('email', emailLower)
+            .maybeSingle();
+
+          if (profile?.role) {
+            role = profile.role;
+          } else {
+            const isAdm = emailLower === 'adm@empresa.com' || 
+                          emailLower.startsWith('adm@') || 
+                          emailLower.includes('selante') || 
+                          emailLower.includes('argamassa') || 
+                          emailLower.includes('logistica') || 
+                          emailLower.includes('logistic') ||
+                          nameLower.includes('selante') ||
+                          nameLower.includes('argamassa') ||
+                          nameLower.includes('logistica') ||
+                          nameLower.includes('logistic') ||
+                          nameLower.includes('adm');
+
+            const isGestor = emailLower.includes('gestor') || 
+                             emailLower.includes('gerente') || 
+                             nameLower.includes('gestor') || 
+                             nameLower.includes('gerente') ||
+                             session.user.user_metadata?.role === 'Gestor de Backoffice';
+
+            if (isGestor) {
+              role = 'Gestor de Backoffice';
+            } else if (isAdm) {
+              if (emailLower.includes('selante') || nameLower.includes('selante')) {
+                role = 'Customer Selantes';
+              } else if (emailLower.includes('argamassa') || nameLower.includes('argamassa')) {
+                role = 'Customer Argamassa';
+              } else if (emailLower.includes('logistica') || emailLower.includes('logistic') || nameLower.includes('logistica') || nameLower.includes('logistic')) {
+                role = 'Customer Logística';
+              } else {
+                role = 'ADM';
+              }
+            } else {
+              role = session.user.user_metadata?.role || 'Agente';
+            }
+          }
+        } catch (dbErr) {
+          console.warn('Error reading profile during login:', dbErr);
+        }
+
+        const appUser: User = {
+          email: userEmail,
+          name: nameVal,
+          role: role,
+          avatarUrl: session.user.user_metadata?.avatar_url || DEFAULT_USER.avatarUrl
+        };
+        setCurrentUser(appUser);
+        localStorage.setItem('reliant_user', JSON.stringify(appUser));
+        setActiveScreen('dashboard');
+      }
+
       return { error: null };
     } catch (err: any) {
       console.error('Supabase Login Error:', err);
