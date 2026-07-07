@@ -787,104 +787,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const loginWithSupabase = async (email: string, password: string, name?: string) => {
     const cleanEmail = email.trim().toLowerCase();
     try {
-      // 1. Try real Supabase auth
+      // Try real Supabase auth
       const { data, error } = await supabase.auth.signInWithPassword({
         email: cleanEmail,
         password
       });
-      if (!error) {
-        if (name && name.trim()) {
-          // Update user metadata in Supabase Auth
-          await supabase.auth.updateUser({
-            data: { name: name.trim() }
-          });
-          // Update profile in profiles table
-          await supabase
-            .from('profiles')
-            .upsert({ email: cleanEmail, name: name.trim() }, { onConflict: 'email' });
-        }
-        return { error: null };
+      if (error) {
+        throw error;
       }
       
-      // 2. If real auth fails, check for a local password override or default test users fallback
-      const overrides = JSON.parse(localStorage.getItem('reliant_local_passwords') || '{}');
-      const isDefaultTestUser = cleanEmail === 'gestor@empresa.com' || cleanEmail === 'adm@empresa.com' || cleanEmail.includes('gestor') || cleanEmail.includes('gerente') || cleanEmail.startsWith('adm@');
-      
-      if ((overrides[cleanEmail] && overrides[cleanEmail] === password) || (isDefaultTestUser && password && password.length >= 4)) {
-        // Automatically save to local password overrides for future use
-        if (!overrides[cleanEmail]) {
-          overrides[cleanEmail] = password;
-          localStorage.setItem('reliant_local_passwords', JSON.stringify(overrides));
-        }
-
-        // Find profile for this user from database if possible
-        const { data: profile } = await supabase
+      if (name && name.trim()) {
+        // Update user metadata in Supabase Auth
+        await supabase.auth.updateUser({
+          data: { name: name.trim() }
+        });
+        // Update profile in profiles table
+        await supabase
           .from('profiles')
-          .select('*')
-          .eq('email', cleanEmail)
-          .maybeSingle();
-
-        const emailLower = cleanEmail.toLowerCase().trim();
-        const defaultName = emailLower === 'gestor@empresa.com' ? 'Gestor' : (emailLower === 'adm@empresa.com' ? 'Administrador' : cleanEmail.split('@')[0]);
-        const nameVal = name?.trim() || profile?.name || defaultName;
-        const nameLower = nameVal.toLowerCase().trim();
-        const isAdm = emailLower === 'adm@empresa.com' || 
-                      emailLower.startsWith('adm@') || 
-                      emailLower.includes('selante') || 
-                      emailLower.includes('argamassa') || 
-                      emailLower.includes('logistica') || 
-                      emailLower.includes('logistic') ||
-                      nameLower.includes('selante') ||
-                      nameLower.includes('argamassa') ||
-                      nameLower.includes('logistica') ||
-                      nameLower.includes('logistic') ||
-                      nameLower.includes('adm');
-
-        const isGestor = emailLower.includes('gestor') || 
-                         emailLower.includes('gerente') || 
-                         nameLower.includes('gestor') || 
-                         nameLower.includes('gerente') ||
-                         profile?.role === 'Gestor de Backoffice';
-
-        let role = 'Customer';
-        if (isGestor) {
-          role = 'Gestor de Backoffice';
-        } else if (isAdm) {
-          if (emailLower.includes('selante') || nameLower.includes('selante')) {
-            role = 'Customer Selantes';
-          } else if (emailLower.includes('argamassa') || nameLower.includes('argamassa')) {
-            role = 'Customer Argamassa';
-          } else if (emailLower.includes('logistica') || emailLower.includes('logistic') || nameLower.includes('logistica') || nameLower.includes('logistic')) {
-            role = 'Customer Logística';
-          } else {
-            role = 'ADM';
-          }
-        } else {
-          role = profile?.role || 'Customer';
-        }
-
-        // Upsert profile in Supabase's public profiles table so other views see this user correctly
-        try {
-          await supabase
-            .from('profiles')
-            .upsert({ email: cleanEmail, name: nameVal, role: role }, { onConflict: 'email' });
-        } catch (dbErr) {
-          console.warn('Could not upsert profile on local fallback:', dbErr);
-        }
-
-        const appUser: User = {
-          email: cleanEmail,
-          name: nameVal,
-          role: role,
-          avatarUrl: profile?.avatarUrl || DEFAULT_USER.avatarUrl
-        };
-        setCurrentUser(appUser);
-        localStorage.setItem('reliant_user', JSON.stringify(appUser));
-        setActiveScreen('dashboard');
-        return { error: null };
+          .upsert({ email: cleanEmail, name: name.trim() }, { onConflict: 'email' });
       }
-      
-      throw error;
+      return { error: null };
     } catch (err: any) {
       console.error('Supabase Login Error:', err);
       const isInvalidCredentials = err.message && (
@@ -989,11 +911,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (updateError) {
           throw updateError;
         }
-
-        // Also save password as a local override so they can use it immediately for custom bypass
-        const overrides = JSON.parse(localStorage.getItem('reliant_local_passwords') || '{}');
-        overrides[cleanEmail] = password;
-        localStorage.setItem('reliant_local_passwords', JSON.stringify(overrides));
         
         try {
           await supabase
