@@ -80,7 +80,6 @@ export interface User {
   role: string;
   avatarUrl?: string;
   backoffice_email?: string; // Link seller to a backoffice email
-  backoffice_emails?: string[]; // Multiple backoffice emails linked to this seller
 }
 
 export type ScreenType = 'login' | 'dashboard' | 'ticket-details' | 'resolve' | 'new-ticket' | 'reset-password';

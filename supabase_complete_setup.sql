@@ -2,38 +2,45 @@
 -- SCRIPT COMPLETO DE CONFIGURAÇÃO E MIGRAÇÃO DO BANCO DE DADOS SUPABASE
 -- Execute este script no "SQL Editor" do seu painel do Supabase.
 -- Ele foi projetado para ser executado de forma totalmente segura,
--- adicionando apenas o que estiver faltando sem apagar dados existentes
--- e convertendo tipos/políticas de segurança de forma compatível.
+-- adicionando apenas o que estiver faltando sem apagar dados existentes.
 -- =====================================================================
 
--- 1. CRIAR TABELA DE USUÁRIOS (PERFIS) COM SUPORTE A PAPÉIS EM TEXTO
--- Usar TEXT em vez de ENUM evita erros de tipo no cadastro e atualizações de papéis.
+-- 1. CRIAR ENUM DE PAPÉIS (ROLES) E TABELA DE USUÁRIOS (PERFIS)
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
+    CREATE TYPE public.user_role AS ENUM (
+      'Vendedor/Representante', 
+      'Customer', 
+      'Adm', 
+      'Backoffice', 
+      'Gestor de Backoffice', 
+      'Customer Selantes', 
+      'Customer Argamassa', 
+      'Customer Logística'
+    );
+  END IF;
+END
+$$;
+
+-- Adiciona os novos valores ao tipo caso ele já existisse anteriormente
+ALTER TYPE public.user_role ADD VALUE IF NOT EXISTS 'Customer';
+ALTER TYPE public.user_role ADD VALUE IF NOT EXISTS 'Backoffice';
+ALTER TYPE public.user_role ADD VALUE IF NOT EXISTS 'Gestor de Backoffice';
+ALTER TYPE public.user_role ADD VALUE IF NOT EXISTS 'Customer Selantes';
+ALTER TYPE public.user_role ADD VALUE IF NOT EXISTS 'Customer Argamassa';
+ALTER TYPE public.user_role ADD VALUE IF NOT EXISTS 'Customer Logística';
+
+-- Criar tabela de profiles se não existir
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
   email TEXT NOT NULL,
   name TEXT,
-  role TEXT DEFAULT 'Customer',
+  role public.user_role DEFAULT 'Customer',
   "avatarUrl" TEXT,
   "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
   "updatedAt" TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
-
--- Converter a coluna role para TEXT se ela ainda for do tipo ENUM (bancos existentes)
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1 
-    FROM information_schema.columns 
-    WHERE table_name = 'profiles' 
-      AND column_name = 'role' 
-      AND udt_name = 'user_role'
-  ) THEN
-    ALTER TABLE public.profiles ALTER COLUMN role DROP DEFAULT;
-    ALTER TABLE public.profiles ALTER COLUMN role TYPE TEXT USING role::text;
-    ALTER TABLE public.profiles ALTER COLUMN role SET DEFAULT 'Customer';
-  END IF;
-END
-$$;
 
 -- Adicionar colunas novas de perfil com segurança (se já existirem, não fará nada)
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS "backoffice_email" TEXT;
@@ -92,28 +99,12 @@ ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS "notifyRole" TEXT;
 ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS "senderEmail" TEXT;
 
 -- 4. CRIAR TABELA DE VINCULAÇÃO INDEPENDENTE DE VENDEDORES COM BACKOFFICE
--- Removido o UNIQUE de seller_email para permitir múltiplos analistas vinculados
 CREATE TABLE IF NOT EXISTS public.backoffice_seller_relations (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  seller_email TEXT NOT NULL,
+  seller_email TEXT NOT NULL UNIQUE,
   backoffice_email TEXT NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
-
--- Remover restrição antiga de vendedor único se ela existir
-ALTER TABLE public.backoffice_seller_relations 
-DROP CONSTRAINT IF EXISTS backoffice_seller_relations_seller_email_key;
-
--- Adicionar uma restrição de unicidade para a combinação (vendedor, analista)
--- Isso evita a duplicação do mesmo vínculo exato, mas permite que o vendedor tenha múltiplos analistas diferentes
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'backoffice_seller_relations_unique_link') THEN
-    ALTER TABLE public.backoffice_seller_relations 
-    ADD CONSTRAINT backoffice_seller_relations_unique_link UNIQUE (seller_email, backoffice_email);
-  END IF;
-END
-$$;
 
 -- 5. HABILITAR SEGURANÇA EM NÍVEL DE LINHA (RLS - ROW LEVEL SECURITY)
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
@@ -121,70 +112,68 @@ ALTER TABLE public.tickets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.backoffice_seller_relations ENABLE ROW LEVEL SECURITY;
 
--- 6. CRIAR POLÍTICAS DE ACESSO DE FORMA SEGURA (REESCRITAS PARA EVITAR ERROS)
--- Nota: Para permitir atualizações de perfis (vinculações e papéis), mudamos de auth.uid() para acesso público/autenticado total.
+-- Criar políticas de acesso de forma segura (verificando antes de criar)
+DO $$
+BEGIN
+  -- Perfis (Profiles)
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'profiles' AND policyname = 'Permitir leitura pública de perfis') THEN
+    CREATE POLICY "Permitir leitura pública de perfis" ON public.profiles FOR SELECT USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'profiles' AND policyname = 'Permitir atualização do próprio perfil') THEN
+    CREATE POLICY "Permitir atualização do próprio perfil" ON public.profiles FOR UPDATE USING (auth.uid() = id);
+  END IF;
 
--- Perfis (Profiles)
-DROP POLICY IF EXISTS "Permitir leitura pública de perfis" ON public.profiles;
-CREATE POLICY "Permitir leitura pública de perfis" ON public.profiles FOR SELECT USING (true);
+  -- Tickets
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'tickets' AND policyname = 'Permitir leitura pública') THEN
+    CREATE POLICY "Permitir leitura pública" ON public.tickets FOR SELECT USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'tickets' AND policyname = 'Permitir inserção pública') THEN
+    CREATE POLICY "Permitir inserção pública" ON public.tickets FOR INSERT WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'tickets' AND policyname = 'Permitir atualização pública') THEN
+    CREATE POLICY "Permitir atualização pública" ON public.tickets FOR UPDATE USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'tickets' AND policyname = 'Permitir exclusão pública') THEN
+    CREATE POLICY "Permitir exclusão pública" ON public.tickets FOR DELETE USING (true);
+  END IF;
 
-DROP POLICY IF EXISTS "Permitir inserção pública de perfis" ON public.profiles;
-CREATE POLICY "Permitir inserção pública de perfis" ON public.profiles FOR INSERT WITH CHECK (true);
+  -- Notificações (Notifications)
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'notifications' AND policyname = 'Permitir leitura pública') THEN
+    CREATE POLICY "Permitir leitura pública" ON public.notifications FOR SELECT USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'notifications' AND policyname = 'Permitir inserção pública') THEN
+    CREATE POLICY "Permitir inserção pública" ON public.notifications FOR INSERT WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'notifications' AND policyname = 'Permitir atualização pública') THEN
+    CREATE POLICY "Permitir atualização pública" ON public.notifications FOR UPDATE USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'notifications' AND policyname = 'Permitir exclusão pública') THEN
+    CREATE POLICY "Permitir exclusão pública" ON public.notifications FOR DELETE USING (true);
+  END IF;
 
-DROP POLICY IF EXISTS "Permitir atualização pública de perfis" ON public.profiles;
-CREATE POLICY "Permitir atualização pública de perfis" ON public.profiles FOR UPDATE USING (true);
+  -- Relações de Backoffice (backoffice_seller_relations)
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'backoffice_seller_relations' AND policyname = 'Permitir leitura pública de vinculações') THEN
+    CREATE POLICY "Permitir leitura pública de vinculações" ON public.backoffice_seller_relations FOR SELECT USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'backoffice_seller_relations' AND policyname = 'Permitir inserção pública de vinculações') THEN
+    CREATE POLICY "Permitir inserção pública de vinculações" ON public.backoffice_seller_relations FOR INSERT WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'backoffice_seller_relations' AND policyname = 'Permitir atualização pública de vinculações') THEN
+    CREATE POLICY "Permitir atualização pública de vinculações" ON public.backoffice_seller_relations FOR UPDATE USING (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'backoffice_seller_relations' AND policyname = 'Permitir exclusão pública de vinculações') THEN
+    CREATE POLICY "Permitir exclusão pública de vinculações" ON public.backoffice_seller_relations FOR DELETE USING (true);
+  END IF;
+END
+$$;
 
-DROP POLICY IF EXISTS "Permitir exclusão pública de perfis" ON public.profiles;
-CREATE POLICY "Permitir exclusão pública de perfis" ON public.profiles FOR DELETE USING (true);
-
-DROP POLICY IF EXISTS "Permitir atualização do próprio perfil" ON public.profiles;
-
--- Tickets
-DROP POLICY IF EXISTS "Permitir leitura pública" ON public.tickets;
-CREATE POLICY "Permitir leitura pública" ON public.tickets FOR SELECT USING (true);
-
-DROP POLICY IF EXISTS "Permitir inserção pública" ON public.tickets;
-CREATE POLICY "Permitir inserção pública" ON public.tickets FOR INSERT WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Permitir atualização pública" ON public.tickets;
-CREATE POLICY "Permitir atualização pública" ON public.tickets FOR UPDATE USING (true);
-
-DROP POLICY IF EXISTS "Permitir exclusão pública" ON public.tickets;
-CREATE POLICY "Permitir exclusão pública" ON public.tickets FOR DELETE USING (true);
-
--- Notificações (Notifications)
-DROP POLICY IF EXISTS "Permitir leitura pública" ON public.notifications;
-CREATE POLICY "Permitir leitura pública" ON public.notifications FOR SELECT USING (true);
-
-DROP POLICY IF EXISTS "Permitir inserção pública" ON public.notifications;
-CREATE POLICY "Permitir inserção pública" ON public.notifications FOR INSERT WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Permitir atualização pública" ON public.notifications;
-CREATE POLICY "Permitir atualização pública" ON public.notifications FOR UPDATE USING (true);
-
-DROP POLICY IF EXISTS "Permitir exclusão pública" ON public.notifications;
-CREATE POLICY "Permitir exclusão pública" ON public.notifications FOR DELETE USING (true);
-
--- Relações de Backoffice (backoffice_seller_relations)
-DROP POLICY IF EXISTS "Permitir leitura pública de vinculações" ON public.backoffice_seller_relations;
-CREATE POLICY "Permitir leitura pública de vinculações" ON public.backoffice_seller_relations FOR SELECT USING (true);
-
-DROP POLICY IF EXISTS "Permitir inserção pública de vinculações" ON public.backoffice_seller_relations;
-CREATE POLICY "Permitir inserção pública de vinculações" ON public.backoffice_seller_relations FOR INSERT WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Permitir atualização pública de vinculações" ON public.backoffice_seller_relations;
-CREATE POLICY "Permitir atualização pública de vinculações" ON public.backoffice_seller_relations FOR UPDATE USING (true);
-
-DROP POLICY IF EXISTS "Permitir exclusão pública de vinculações" ON public.backoffice_seller_relations;
-CREATE POLICY "Permitir exclusão pública de vinculações" ON public.backoffice_seller_relations FOR DELETE USING (true);
-
--- 7. TRIGGER AUTOMÁTICO PARA COPIAR USUÁRIOS DE AUTH.USERS PARA PUBLIC.PROFILES (SEGURO COM TEXT)
+-- 6. TRIGGER AUTOMÁTICO PARA COPIAR USUÁRIOS DE AUTH.USERS PARA PUBLIC.PROFILES
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 DECLARE
-  assigned_role TEXT;
-  meta_role TEXT;
-  meta_name TEXT;
+  assigned_role public.user_role;
+  meta_role text;
+  meta_name text;
 BEGIN
   -- Extrai dados de metadados com segurança
   meta_role := COALESCE(new.raw_user_meta_data->>'role', '');
@@ -192,24 +181,24 @@ BEGIN
 
   -- Define o papel correspondente com base nos metadados ou regras
   IF meta_role = 'Adm' OR meta_role = 'ADM' OR new.email = 'adm@empresa.com' THEN
-    assigned_role := 'Adm';
+    assigned_role := 'Adm'::public.user_role;
   ELSIF meta_role = 'Vendedor/Representante' THEN
-    assigned_role := 'Vendedor/Representante';
+    assigned_role := 'Vendedor/Representante'::public.user_role;
   ELSIF meta_role = 'Gestor de Backoffice' THEN
-    assigned_role := 'Gestor de Backoffice';
+    assigned_role := 'Gestor de Backoffice'::public.user_role;
   ELSIF meta_role = 'Backoffice' THEN
-    assigned_role := 'Backoffice';
+    assigned_role := 'Backoffice'::public.user_role;
   ELSIF meta_role = 'Customer Selantes' THEN
-    assigned_role := 'Customer Selantes';
+    assigned_role := 'Customer Selantes'::public.user_role;
   ELSIF meta_role = 'Customer Argamassa' THEN
-    assigned_role := 'Customer Argamassa';
+    assigned_role := 'Customer Argamassa'::public.user_role;
   ELSIF meta_role = 'Customer Logística' THEN
-    assigned_role := 'Customer Logística';
+    assigned_role := 'Customer Logística'::public.user_role;
   ELSE
-    assigned_role := 'Customer'; -- Fallback seguro padrão
+    assigned_role := 'Customer'::public.user_role; -- Fallback seguro padrão
   END IF;
 
-  -- Bloco protegido para inserção do perfil do usuário para evitar travar a autenticação
+  -- Bloco protegido para inserção do perfil do usuário
   BEGIN
     INSERT INTO public.profiles (id, email, name, role)
     VALUES (
@@ -225,7 +214,8 @@ BEGIN
       role = EXCLUDED.role,
       "updatedAt" = timezone('utc'::text, now());
   EXCEPTION WHEN OTHERS THEN
-    -- Apenas emite um warning no log do PostgreSQL em caso de falha, para não barrar o cadastro do usuário
+    -- Silencia o erro para garantir que a transação de autenticação principal NÃO seja abortada.
+    -- Isso evita o erro HTTP 500 'Database error saving new user' de travar o usuário.
     RAISE WARNING 'Erro ao criar perfil automaticamente para o usuário %: %', new.email, SQLERRM;
   END;
 
@@ -233,13 +223,14 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Recria o trigger de forma limpa
+-- Remove o trigger se já existir para evitar conflitos
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
--- 8. HABILITAR ATUALIZAÇÕES EM TEMPO REAL (REALTIME) SE AINDA NÃO ADICIONADO
+-- 7. HABILITAR ATUALIZAÇÕES EM TEMPO REAL (REALTIME) SE AINDA NÃO ADICIONADO
 DO $$
 BEGIN
   -- Cria publicação de realtime se não existir
