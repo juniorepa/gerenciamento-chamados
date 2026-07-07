@@ -4,14 +4,15 @@
 -- =====================================================================
 
 -- 1. CRIAR ENUM DE PAPÉIS (ROLES) E TABELA DE USUÁRIOS (PERFIS)
-CREATE TYPE public.user_role AS ENUM ('Vendedor/Representante', 'Customer', 'Adm', 'Gestor de Customer');
+CREATE TYPE public.user_role AS ENUM ('Vendedor/Representante', 'Customer', 'Adm');
 
 CREATE TABLE IF NOT EXISTS public.profiles (
   id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
   email TEXT NOT NULL,
   name TEXT,
-  role public.user_role DEFAULT 'Vendedor/Representante',
+  role public.user_role DEFAULT 'Customer',
   "avatarUrl" TEXT,
+  "backoffice_email" TEXT,
   "createdAt" TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
   "updatedAt" TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
@@ -78,18 +79,28 @@ CREATE POLICY "Permitir exclusão pública" ON public.notifications FOR DELETE U
 -- 5. TRIGGER AUTOMÁTICO PARA COPIAR USUÁRIOS DE AUTH.USERS PARA PUBLIC.PROFILES
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
+DECLARE
+  assigned_role public.user_role;
+  meta_role text;
 BEGIN
+  meta_role := COALESCE(new.raw_user_meta_data->>'role', '');
+  
+  IF meta_role = 'Adm' OR meta_role = 'ADM' OR new.email = 'adm@empresa.com' THEN
+    assigned_role := 'Adm'::public.user_role;
+  ELSIF meta_role = 'Vendedor/Representante' THEN
+    assigned_role := 'Vendedor/Representante'::public.user_role;
+  ELSIF meta_role = 'Gestor de Backoffice' THEN
+    assigned_role := 'Gestor de Backoffice'::public.user_role;
+  ELSE
+    assigned_role := 'Backoffice'::public.user_role;
+  END IF;
+
   INSERT INTO public.profiles (id, email, name, role)
   VALUES (
     new.id,
     new.email,
     COALESCE(new.raw_user_meta_data->>'name', new.raw_user_meta_data->>'full_name', 'Usuário'),
-    CASE 
-      WHEN new.raw_user_meta_data->>'role' = 'Adm' OR new.email = 'adm@empresa.com' THEN 'Adm'::public.user_role
-      WHEN new.raw_user_meta_data->>'role' = 'Vendedor/Representante' THEN 'Vendedor/Representante'::public.user_role
-      WHEN new.raw_user_meta_data->>'role' = 'Gestor de Customer' THEN 'Gestor de Customer'::public.user_role
-      ELSE 'Vendedor/Representante'::public.user_role
-    END
+    assigned_role
   )
   ON CONFLICT (id) DO UPDATE
   SET 

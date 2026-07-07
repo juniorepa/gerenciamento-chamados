@@ -11,6 +11,7 @@ import { TicketDetailsScreen } from './components/TicketDetailsScreen';
 import { ResolveScreen } from './components/ResolveScreen';
 import { NewTicketScreen } from './components/NewTicketScreen';
 import { ResetPasswordScreen } from './components/ResetPasswordScreen';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { motion, AnimatePresence } from 'motion/react';
 
 function AppContent() {
@@ -56,7 +57,9 @@ function AppContent() {
 export default function App() {
   return (
     <AppProvider>
-      <AppContent />
+      <ErrorBoundary>
+        <AppContent />
+      </ErrorBoundary>
     </AppProvider>
   );
 }

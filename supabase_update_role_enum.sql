@@ -8,13 +8,10 @@
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
-    CREATE TYPE public.user_role AS ENUM ('Vendedor/Representante', 'Customer', 'Adm', 'Gestor de Customer');
+    CREATE TYPE public.user_role AS ENUM ('Vendedor/Representante', 'Customer', 'Adm');
   END IF;
 END
 $$;
-
--- Garantir que a nova role exista se o tipo ENUM já existia anteriormente
-ALTER TYPE public.user_role ADD VALUE IF NOT EXISTS 'Gestor de Customer';
 
 -- 2. Atualizar a coluna 'role' na tabela 'profiles' para usar o novo tipo ENUM
 -- Primeiramente, removemos o valor padrão temporariamente
@@ -27,13 +24,12 @@ ALTER TABLE public.profiles
     CASE 
       WHEN role = 'ADM' OR role = 'Adm' THEN 'Adm'::public.user_role
       WHEN role = 'Vendedor/Representante' THEN 'Vendedor/Representante'::public.user_role
-      WHEN role = 'Gestor de Customer' THEN 'Gestor de Customer'::public.user_role
-      ELSE 'Vendedor/Representante'::public.user_role
+      ELSE 'Customer'::public.user_role
     END
   );
 
 -- Definimos o novo valor padrão como 'Customer' do tipo ENUM
-ALTER TABLE public.profiles ALTER COLUMN role SET DEFAULT 'Vendedor/Representante'::public.user_role;
+ALTER TABLE public.profiles ALTER COLUMN role SET DEFAULT 'Customer'::public.user_role;
 
 -- 3. Atualizar a função do Trigger para usar o tipo ENUM corretamente
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -47,8 +43,7 @@ BEGIN
     CASE 
       WHEN new.raw_user_meta_data->>'role' = 'Adm' OR new.email = 'adm@empresa.com' THEN 'Adm'::public.user_role
       WHEN new.raw_user_meta_data->>'role' = 'Vendedor/Representante' THEN 'Vendedor/Representante'::public.user_role
-      WHEN new.raw_user_meta_data->>'role' = 'Gestor de Customer' THEN 'Gestor de Customer'::public.user_role
-      ELSE 'Vendedor/Representante'::public.user_role
+      ELSE 'Customer'::public.user_role
     END
   )
   ON CONFLICT (id) DO UPDATE

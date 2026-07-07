@@ -24,9 +24,14 @@ import {
   Layers,
   Truck,
   MessageSquare,
-  Send
+  Send,
+  LogOut,
+  Inbox,
+  SlidersHorizontal,
+  Download
 } from 'lucide-react';
 import { motion } from 'motion/react';
+import { jsPDF } from 'jspdf';
 
 export const TicketDetailsScreen: React.FC = () => {
   const { 
@@ -58,6 +63,15 @@ export const TicketDetailsScreen: React.FC = () => {
   // Local state for client return submission
   const [userResponseText, setUserResponseText] = useState('');
   const [isSubmittingResponse, setIsSubmittingResponse] = useState(false);
+
+  if (!currentUser) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-[#f7f9fb] p-4 text-center">
+        <div className="w-10 h-10 border-4 border-[#00236f] border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p className="text-sm font-bold text-gray-500">Carregando dados da sessão...</p>
+      </div>
+    );
+  }
 
   // Find the selected ticket or default to the first one
   const ticket = tickets.find(t => t.id === selectedTicketId) || tickets[0];
@@ -94,6 +108,262 @@ export const TicketDetailsScreen: React.FC = () => {
       </div>
     );
   }
+
+  const downloadTicketPDF = () => {
+    if (!ticket) return;
+
+    try {
+      const doc = new jsPDF();
+      
+      const cleanText = (str: string | undefined): string => {
+        if (!str) return '';
+        return str
+          .replace(/😍/g, '[Excelente]')
+          .replace(/👍/g, '[Bom]')
+          .replace(/😞/g, '[Ruim]')
+          .replace(/🔔/g, '[Alerta]')
+          .replace(/🚚/g, '[Logistica]')
+          .replace(/💡/g, '[Nota]')
+          .replace(/⭐/g, '*')
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '') // remove Portuguese accents so PDF renders clean ASCII
+          .replace(/[^\x00-\x7F]/g, ''); // keep only ASCII
+      };
+
+      let y = 15;
+
+      // Corporate Blue Header Banner
+      doc.setFillColor(0, 35, 111); // Navy Blue (#00236f)
+      doc.rect(0, 0, 210, 38, 'F');
+
+      // Header Text
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(18);
+      doc.text('ERP CONEXAO - ARQUIVO POS-VENDA', 15, 15);
+      
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      doc.text('RELATORIO CONSOLIDADO DE AUDITORIA E CONTROLE INTERNO', 15, 22);
+      doc.text(`Gerado em: ${new Date().toLocaleString('pt-BR')}`, 15, 28);
+      doc.text(`Emitido por: ${cleanText(currentUser?.name || '')} (${cleanText(currentUser?.role || '')})`, 15, 33);
+
+      y = 48;
+
+      // SECTION 1: GENERAL INFORMATION
+      doc.setFillColor(240, 243, 248);
+      doc.rect(15, y, 180, 8, 'F');
+      doc.setTextColor(0, 35, 111);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.text('1. DADOS IDENTIFICADORES DO CHAMADO', 18, y + 6);
+
+      y += 14;
+
+      doc.setTextColor(50, 50, 50);
+      doc.setFontSize(9);
+
+      // Grid of attributes
+      doc.setFont('helvetica', 'bold'); doc.text('ID do Chamado:', 15, y);
+      doc.setFont('helvetica', 'normal'); doc.text(cleanText(ticket.id), 48, y);
+
+      doc.setFont('helvetica', 'bold'); doc.text('Categoria:', 115, y);
+      doc.setFont('helvetica', 'normal'); doc.text(cleanText(ticket.category), 148, y);
+
+      y += 6;
+
+      doc.setFont('helvetica', 'bold'); doc.text('Status Atual:', 15, y);
+      doc.setFont('helvetica', 'normal'); doc.text(cleanText(ticket.status), 48, y);
+
+      doc.setFont('helvetica', 'bold'); doc.text('Prioridade:', 115, y);
+      doc.setFont('helvetica', 'normal'); doc.text(cleanText(ticket.priority), 148, y);
+
+      y += 6;
+
+      doc.setFont('helvetica', 'bold'); doc.text('Data de Criacao:', 15, y);
+      doc.setFont('helvetica', 'normal'); doc.text(cleanText(ticket.createdAt), 48, y);
+
+      doc.setFont('helvetica', 'bold'); doc.text('Unidade Customer:', 115, y);
+      doc.setFont('helvetica', 'normal'); doc.text(cleanText(ticket.customerGroup || 'Nao Informado'), 148, y);
+
+      y += 6;
+
+      doc.setFont('helvetica', 'bold'); doc.text('Ultima Atualizacao:', 15, y);
+      doc.setFont('helvetica', 'normal'); doc.text(cleanText(ticket.updatedAt), 48, y);
+
+      doc.setFont('helvetica', 'bold'); doc.text('Responsavel:', 115, y);
+      doc.setFont('helvetica', 'normal'); doc.text(cleanText(ticket.assigneeName || 'Equipe Pos-Venda'), 148, y);
+
+      y += 12;
+
+      // SECTION 2: CLIENT DETAILS
+      doc.setFillColor(240, 243, 248);
+      doc.rect(15, y, 180, 8, 'F');
+      doc.setTextColor(0, 35, 111);
+      doc.setFont('helvetica', 'bold');
+      doc.text('2. INFORMACOES DO CLIENTE', 18, y + 6);
+
+      y += 14;
+
+      doc.setTextColor(50, 50, 50);
+      doc.setFont('helvetica', 'bold'); doc.text('Nome / Razao Social:', 15, y);
+      doc.setFont('helvetica', 'normal'); doc.text(cleanText(ticket.clientName), 52, y);
+
+      y += 6;
+
+      doc.setFont('helvetica', 'bold'); doc.text('Pessoa de Contato:', 15, y);
+      doc.setFont('helvetica', 'normal'); doc.text(cleanText(ticket.contactPerson || 'Nao informado'), 52, y);
+
+      y += 6;
+
+      doc.setFont('helvetica', 'bold'); doc.text('E-mail de Contato:', 15, y);
+      doc.setFont('helvetica', 'normal'); doc.text(cleanText(ticket.contactEmail || 'Nao informado'), 52, y);
+
+      y += 12;
+
+      // SECTION 3: DESCRIPTION
+      doc.setFillColor(240, 243, 248);
+      doc.rect(15, y, 180, 8, 'F');
+      doc.setTextColor(0, 35, 111);
+      doc.setFont('helvetica', 'bold');
+      doc.text('3. DESCRICAO DA OCORRENCIA', 18, y + 6);
+
+      y += 14;
+
+      doc.setTextColor(60, 60, 60);
+      doc.setFont('helvetica', 'normal');
+      
+      const descLines = doc.splitTextToSize(cleanText(ticket.description), 175);
+      doc.text(descLines, 15, y);
+      y += descLines.length * 4.5 + 4;
+
+      // Conditional custom fields inside Description section
+      if (ticket.category === 'Remanejamento' && (ticket.vendasNumber || ticket.transferReason)) {
+        doc.setFillColor(250, 250, 250);
+        doc.rect(15, y, 180, 22, 'F');
+        doc.setTextColor(0, 35, 111);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Detalhes do Remanejamento:', 18, y + 5);
+        
+        doc.setTextColor(50, 50, 50);
+        doc.setFont('helvetica', 'bold'); doc.text('Rota / No. Vendas Destino:', 18, y + 10);
+        doc.setFont('helvetica', 'normal'); doc.text(cleanText(ticket.vendasNumber || 'Nao informado'), 60, y + 10);
+
+        doc.setFont('helvetica', 'bold'); doc.text('Motivo da Transferencia:', 18, y + 15);
+        doc.setFont('helvetica', 'normal'); 
+        const transLines = doc.splitTextToSize(cleanText(ticket.transferReason || 'Nao detalhado'), 125);
+        doc.text(transLines, 60, y + 15);
+        
+        y += 28;
+      }
+
+      if (ticket.category === 'Logístico' && ticket.logisticSituation) {
+        doc.setFillColor(250, 250, 250);
+        doc.rect(15, y, 180, 12, 'F');
+        doc.setTextColor(0, 35, 111);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Detalhes de Logistica:', 18, y + 5);
+        
+        doc.setTextColor(50, 50, 50);
+        doc.setFont('helvetica', 'bold'); doc.text('Situacao Logistica:', 18, y + 9);
+        doc.setFont('helvetica', 'normal'); doc.text(cleanText(ticket.logisticSituation), 52, y + 9);
+
+        y += 18;
+      }
+
+      // Check page break before printing history
+      if (y > 180) {
+        doc.addPage();
+        y = 20;
+      }
+
+      // SECTION 4: SATISFACTION FEEDBACK (Rating)
+      if (ticket.rating) {
+        doc.setFillColor(240, 243, 248);
+        doc.rect(15, y, 180, 8, 'F');
+        doc.setTextColor(0, 35, 111);
+        doc.setFont('helvetica', 'bold');
+        doc.text('4. AVALIACAO DO ATENDIMENTO PELO CLIENTE', 18, y + 6);
+
+        y += 14;
+
+        doc.setTextColor(50, 50, 50);
+        doc.setFont('helvetica', 'bold'); doc.text('Nota dada pelo cliente:', 15, y);
+        doc.setFont('helvetica', 'normal'); doc.text(cleanText(ticket.rating), 54, y);
+
+        if (ticket.ratingComment) {
+          y += 6;
+          doc.setFont('helvetica', 'bold'); doc.text('Comentarios do cliente:', 15, y);
+          doc.setFont('helvetica', 'normal');
+          const commentLines = doc.splitTextToSize(cleanText(ticket.ratingComment), 135);
+          doc.text(commentLines, 54, y);
+          y += commentLines.length * 4.5;
+        }
+        
+        y += 10;
+      }
+
+      if (y > 190) {
+        doc.addPage();
+        y = 20;
+      }
+
+      // SECTION 5: AUDIT HISTORY TIMELINE LOG
+      doc.setFillColor(240, 243, 248);
+      doc.rect(15, y, 180, 8, 'F');
+      doc.setTextColor(0, 35, 111);
+      doc.setFont('helvetica', 'bold');
+      doc.text('5. HISTORICO DE STATUS E AUDITORIA', 18, y + 6);
+
+      y += 14;
+
+      ticket.history.forEach((h: any) => {
+        if (y > 270) {
+          doc.addPage();
+          y = 20;
+        }
+
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(0, 35, 111);
+        doc.text(`[${h.timestamp}] - ${cleanText(h.title)}`, 15, y);
+        
+        y += 4.5;
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(80, 80, 80);
+        const entryDescLines = doc.splitTextToSize(cleanText(h.description), 170);
+        doc.text(entryDescLines, 18, y);
+        
+        y += entryDescLines.length * 4.5 + 4;
+      });
+
+      // Footer signature space at the very end
+      if (y > 240) {
+        doc.addPage();
+        y = 30;
+      } else {
+        y += 15;
+      }
+
+      doc.setDrawColor(200, 200, 200);
+      doc.line(15, y, 90, y);
+      doc.line(120, y, 195, y);
+      
+      y += 4;
+      doc.setFontSize(8);
+      doc.setTextColor(120, 120, 120);
+      doc.text('Assinatura do Gestor Responsavel', 15, y);
+      doc.text('Assinatura da Auditoria Interna', 120, y);
+
+      y += 8;
+      doc.setFont('helvetica', 'bold');
+      doc.text('Este documento e um registro autentico gerado eletronicamente no Portal ERP Pos-Venda.', 15, y);
+
+      doc.save(`chamado-${ticket.id}-auditoria.pdf`);
+    } catch (error) {
+      console.error("Erro ao gerar PDF", error);
+      alert("Ocorreu um erro ao gerar o arquivo PDF. Por favor, tente novamente.");
+    }
+  };
 
   const playChime = () => {
     try {
@@ -252,6 +522,15 @@ export const TicketDetailsScreen: React.FC = () => {
                     className="w-full text-left px-4 py-2 hover:bg-gray-50 flex items-center gap-2 text-gray-700"
                   >
                     <span>Compartilhar Chamado</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      downloadTicketPDF();
+                      setShowMenu(false);
+                    }}
+                    className="w-full text-left px-4 py-2 hover:bg-gray-50 border-t border-gray-100 flex items-center gap-2 text-emerald-700 font-bold"
+                  >
+                    <span>Baixar PDF (Auditoria)</span>
                   </button>
                   <button
                     onClick={() => {
@@ -520,7 +799,7 @@ export const TicketDetailsScreen: React.FC = () => {
                       className="w-full sm:w-auto h-10 px-5 bg-indigo-600 hover:bg-indigo-750 text-white rounded-xl text-xs font-bold shadow-md hover:shadow-lg active:scale-[0.98] transition-all flex items-center justify-center gap-1.5 shrink-0"
                     >
                       <Send className="w-3.5 h-3.5" />
-                      Enviar Retorno e Atualizar Chamado
+                      <span>Enviar Retorno e Atualizar Chamado</span>
                     </button>
                   </div>
                 </div>
@@ -743,6 +1022,28 @@ export const TicketDetailsScreen: React.FC = () => {
               )}
             </div>
 
+            {ticket.status === 'Resolvido' && (
+              <div className="bg-gradient-to-br from-emerald-50 to-emerald-100/40 border border-emerald-200 p-5 rounded-2xl shadow-sm space-y-3 animate-in fade-in duration-300 text-left">
+                <div className="flex items-center gap-2 text-emerald-800">
+                  <FileText className="w-4.5 h-4.5 text-emerald-600" />
+                  <h3 className="font-extrabold text-[11px] tracking-widest uppercase text-emerald-800">
+                    Arquivo de Auditoria
+                  </h3>
+                </div>
+                <p className="text-[11px] text-emerald-700 leading-normal font-medium">
+                  Este chamado foi finalizado e resolvido. Baixe as informações em PDF para auditoria ou arquivamento do sistema.
+                </p>
+                <button
+                  id="download-pdf-sidebar-btn"
+                  onClick={downloadTicketPDF}
+                  className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md shadow-emerald-600/10"
+                >
+                  <Download className="w-4 h-4" />
+                  Baixar PDF do Chamado
+                </button>
+              </div>
+            )}
+
             {/* Quick action buttons container */}
             <div className="bg-white border border-gray-150 p-5 rounded-2xl shadow-sm space-y-4">
               <h3 className="font-extrabold text-[11px] tracking-widest uppercase text-gray-400">
@@ -828,7 +1129,7 @@ export const TicketDetailsScreen: React.FC = () => {
       {/* Bottom Navigation mimic bar */}
       <nav className="fixed bottom-0 left-0 right-0 w-full z-50 bg-[#f7f9fb] border-t border-gray-200 flex justify-around items-center h-16 px-4">
         <button onClick={() => setScreen('dashboard')} className="flex flex-col items-center justify-center text-gray-500 hover:text-[#00236f] transition-colors">
-          <History className="w-5 h-5" />
+          <Inbox className="w-5 h-5" />
           <span className="text-[10px] font-semibold mt-0.5">Painel</span>
         </button>
         {!isAdm && (
@@ -845,7 +1146,7 @@ export const TicketDetailsScreen: React.FC = () => {
           className="flex flex-col items-center justify-center text-gray-500 hover:text-[#00236f] transition-colors"
           title="Ver Status dos Chamados"
         >
-          <History className="w-5 h-5 rotate-180" />
+          <SlidersHorizontal className="w-5 h-5" />
           <span className="text-[10px] font-semibold mt-0.5">Status</span>
         </button>
         <button 
@@ -853,7 +1154,7 @@ export const TicketDetailsScreen: React.FC = () => {
           className="flex flex-col items-center justify-center text-gray-500 hover:text-red-600 transition-colors"
           title="Sair da Conta"
         >
-          <StickyNote className="w-5 h-5" />
+          <LogOut className="w-5 h-5" />
           <span className="text-[10px] font-semibold mt-0.5">Sair</span>
         </button>
       </nav>

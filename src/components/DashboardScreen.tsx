@@ -18,7 +18,13 @@ import {
   X,
   MapPin,
   Globe,
-  Clock
+  Clock,
+  UserCheck,
+  UserX,
+  Link2,
+  Users,
+  Check,
+  Building
 } from 'lucide-react';
 import { MAP_IMAGE_URL } from '../data';
 import { motion, AnimatePresence } from 'motion/react';
@@ -42,14 +48,28 @@ export const DashboardScreen: React.FC = () => {
     statusFilter,
     setStatusFilter,
     regionFilter,
-    setRegionFilter
+    setRegionFilter,
+    allProfiles,
+    linkSellerToBackoffice
   } = useApp();
+
+  const [filterMySellers, setFilterMySellers] = useState<boolean>(() => {
+    return localStorage.getItem('reliant_filter_my_sellers') !== 'false';
+  });
+
+  const handleToggleFilterMySellers = (val: boolean) => {
+    setFilterMySellers(val);
+    localStorage.setItem('reliant_filter_my_sellers', String(val));
+  };
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [localSearch, setLocalSearch] = useState('');
   const [showOptions, setShowOptions] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showStatusModal, setShowStatusModal] = useState(false);
+  const [showSellersPanel, setShowSellersPanel] = useState(false);
+  const [sellerToLink, setSellerToLink] = useState('');
+  const [linkingLoading, setLinkingLoading] = useState(false);
 
   const emailLower = currentUser?.email?.toLowerCase() || '';
   const nameLower = currentUser?.name?.toLowerCase() || '';
@@ -73,12 +93,32 @@ export const DashboardScreen: React.FC = () => {
                 roleLower.includes('adm') ||
                 (currentUser?.role && ['ADM', 'Customer Selantes', 'Customer Argamassa', 'Customer Logística'].includes(currentUser.role));
 
+  const isGestor = currentUser?.role === 'Gestor de Backoffice' ||
+                   emailLower.includes('gestor') ||
+                   emailLower.includes('gerente') ||
+                   nameLower.includes('gestor') ||
+                   nameLower.includes('gerente');
+
+  const isBackoffice = isAdm && !isGestor;
+
+  // Local state for the Gestor panel linkage dropdowns: { [sellerEmail]: backofficeEmail }
+  const [gestorSelections, setGestorSelections] = useState<Record<string, string>>({});
+
   useEffect(() => {
     if (localStorage.getItem('open_status_modal') === 'true') {
       setShowStatusModal(true);
       localStorage.removeItem('open_status_modal');
     }
   }, []);
+
+  if (!currentUser) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-[#f7f9fb] p-4 text-center">
+        <div className="w-10 h-10 border-4 border-[#00236f] border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p className="text-sm font-bold text-gray-500">Carregando dados da sessão...</p>
+      </div>
+    );
+  }
 
   // Only show notifications for the logged in user
   const userNotifications = notifications.filter(notif => {
@@ -99,22 +139,41 @@ export const DashboardScreen: React.FC = () => {
         return ticket?.assigneeName === currentUser?.name;
       }
       if (notif.notifyRole === 'admin') {
-        return currentUser?.role === 'Admin' || isAdm;
+        return currentUser?.role === 'Admin' || isAdm || isGestor;
       }
       if (notif.notifyRole === 'both') {
-        return ticket?.assigneeName === currentUser?.name || currentUser?.role === 'Admin' || isAdm;
+        return ticket?.assigneeName === currentUser?.name || currentUser?.role === 'Admin' || isAdm || isGestor;
       }
     }
     
     // If neither is specified but user is admin, show as fallback
-    if (isAdm) return true;
+    if (isAdm || isGestor) return true;
     
     return false;
   });
 
-  // Role-based visibility: Common users see only their own, admin sees everything
+  // Find sellers linked to the current logged-in Backoffice user
+  const linkedSellers = allProfiles
+    .filter(p => p && p.backoffice_email && p.email && p.backoffice_email.toLowerCase().trim() === currentUser?.email?.toLowerCase().trim())
+    .map(p => p.email ? p.email.toLowerCase().trim() : '')
+    .filter(Boolean);
+
+  // Role-based visibility: Common users see only their own, backoffice sees linked or all based on filter
   const visibleTickets = tickets.filter(t => {
-    if (isAdm) return true;
+    if (isGestor) {
+      return true; // Gestor de Backoffice has full administrative visibility
+    }
+    if (isBackoffice) {
+      if (filterMySellers && linkedSellers.length > 0) {
+        const creator = t.createdBy?.toLowerCase().trim() || '';
+        const contact = t.contactEmail?.toLowerCase().trim() || '';
+        return linkedSellers.includes(creator) || 
+               linkedSellers.includes(contact) || 
+               creator === currentUser?.email?.toLowerCase().trim() ||
+               contact === currentUser?.email?.toLowerCase().trim();
+      }
+      return true;
+    }
     return t.createdBy === currentUser?.email || t.contactEmail === currentUser?.email;
   });
 
@@ -228,8 +287,8 @@ export const DashboardScreen: React.FC = () => {
 
   // Recent status activities across role-visible tickets
   const recentActivities = visibleTickets
-    .flatMap(t => t.history.map(h => ({ ...h, ticketId: t.id, ticketTitle: t.title })))
-    .sort((a, b) => b.id.localeCompare(a.id))
+    .flatMap(t => (t.history || []).map(h => ({ ...h, ticketId: t.id, ticketTitle: t.title })))
+    .sort((a, b) => (b.id || '').localeCompare(a.id || ''))
     .slice(0, 5);
 
   // Filtered tickets list based on selected segment tab
@@ -518,6 +577,292 @@ export const DashboardScreen: React.FC = () => {
             Analisando {visibleTickets.length} chamados no total. {visibleTickets.filter(t => t.priority === 'Crítico' || t.priority === 'P1 - Crítica').length} casos ativos de alta prioridade.
           </p>
         </section>
+
+        {/* Backoffice - Vendedor Relationship Panel */}
+        {(() => {
+          const allSellers = allProfiles.filter(p => {
+            const pEmail = p.email?.toLowerCase().trim() || '';
+            const pName = p.name?.toLowerCase().trim() || '';
+            const pRole = p.role || '';
+            
+            const isProfileGestor = pRole === 'Gestor de Backoffice' ||
+                                    pEmail.includes('gestor') ||
+                                    pEmail.includes('gerente') ||
+                                    pName.includes('gestor') ||
+                                    pName.includes('gerente');
+
+            const isProfileBackoffice = pEmail === 'adm@empresa.com' || 
+                                        pEmail.startsWith('adm@') || 
+                                        pEmail.includes('selante') || 
+                                        pEmail.includes('argamassa') || 
+                                        pEmail.includes('logistica') || 
+                                        pEmail.includes('logistic') ||
+                                        pName.includes('selante') ||
+                                        pName.includes('argamassa') ||
+                                        pName.includes('logistica') ||
+                                        pName.includes('logistic') ||
+                                        pName.includes('adm') ||
+                                        ['ADM', 'Customer Selantes', 'Customer Argamassa', 'Customer Logística'].includes(pRole);
+            return !isProfileGestor && !isProfileBackoffice;
+          });
+
+          const allBackoffices = allProfiles.filter(p => {
+            const pEmail = p.email?.toLowerCase().trim() || '';
+            const pName = p.name?.toLowerCase().trim() || '';
+            const pRole = p.role || '';
+            
+            const isProfileGestor = pRole === 'Gestor de Backoffice' ||
+                                    pEmail.includes('gestor') ||
+                                    pEmail.includes('gerente') ||
+                                    pName.includes('gestor') ||
+                                    pName.includes('gerente');
+
+            const isProfileBackoffice = pEmail === 'adm@empresa.com' || 
+                                        pEmail.startsWith('adm@') || 
+                                        pEmail.includes('selante') || 
+                                        pEmail.includes('argamassa') || 
+                                        pEmail.includes('logistica') || 
+                                        pEmail.includes('logistic') ||
+                                        pName.includes('selante') ||
+                                        pName.includes('argamassa') ||
+                                        pName.includes('logistica') ||
+                                        pName.includes('logistic') ||
+                                        pName.includes('adm') ||
+                                        ['ADM', 'Customer Selantes', 'Customer Argamassa', 'Customer Logística'].includes(pRole);
+            return isProfileBackoffice && !isProfileGestor;
+          });
+
+          const myLinkedSellersList = allSellers.filter(s => s.backoffice_email?.toLowerCase().trim() === currentUser?.email?.toLowerCase().trim());
+
+          if (isGestor) {
+            return (
+              <div className="bg-white border border-gray-150 rounded-[18px] p-4 shadow-sm space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-100 pb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-[#00236f]">
+                      <Users className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm text-[#00236f] flex items-center gap-1.5">
+                        Gestão de Vínculos de Atendimento
+                        <span className="text-[10px] font-black bg-blue-100 text-[#00236f] px-2 py-0.5 rounded-full">
+                          {allSellers.length} Vendedores
+                        </span>
+                      </h4>
+                      <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
+                        Gestor de Backoffice • Painel de Controle
+                      </p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setShowSellersPanel(!showSellersPanel)}
+                    className="text-xs font-bold text-white bg-[#00236f] hover:bg-[#001c56] px-3 py-1.5 rounded-lg transition-all active:scale-95"
+                  >
+                    {showSellersPanel ? 'Fechar Painel' : 'Gerenciar Vínculos'}
+                  </button>
+                </div>
+
+                {showSellersPanel && (
+                  <motion.div 
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    className="space-y-3"
+                  >
+                    <p className="text-xs text-gray-500 font-medium leading-relaxed">
+                      Como <strong>Gestor de Backoffice</strong>, você é o responsável por vincular os vendedores e clientes aos respectivos analistas de Backoffice. Selecione o profissional para cada vendedor abaixo e salve.
+                    </p>
+
+                    <div className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
+                      {allSellers.length === 0 ? (
+                        <p className="text-xs text-gray-500 bg-gray-50 p-4 rounded-xl text-center font-medium italic">
+                          Nenhum vendedor cadastrado no sistema ainda.
+                        </p>
+                      ) : (
+                        allSellers.map(seller => {
+                          const linkedEmail = seller.backoffice_email || '';
+                          const selectedValue = gestorSelections[seller.email] !== undefined 
+                            ? gestorSelections[seller.email] 
+                            : linkedEmail;
+                          const handler = linkedEmail 
+                            ? allBackoffices.find(b => b.email.toLowerCase().trim() === linkedEmail.toLowerCase().trim()) 
+                            : null;
+
+                          return (
+                            <div 
+                              key={seller.email} 
+                              className="flex flex-col md:flex-row md:items-center justify-between p-3 rounded-xl bg-gray-50 border border-gray-100 gap-3 hover:bg-gray-100/50 transition-colors"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-xs font-bold text-gray-800 truncate">{seller.name}</span>
+                                  {linkedEmail ? (
+                                    <span className="inline-flex items-center gap-0.5 text-[9px] font-black bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded-full">
+                                      Vinculado
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-0.5 text-[9px] font-black bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full">
+                                      Sem Vínculo
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-[10px] text-gray-400 truncate">{seller.email}</p>
+                                {handler && (
+                                  <p className="text-[10px] text-emerald-600 font-bold mt-0.5 truncate">
+                                    Atendido por: {handler.name} ({handler.email})
+                                  </p>
+                                )}
+                              </div>
+
+                              <div className="flex items-center gap-2 shrink-0">
+                                <select 
+                                  value={selectedValue}
+                                  onChange={(e) => {
+                                    setGestorSelections(prev => ({
+                                      ...prev,
+                                      [seller.email]: e.target.value
+                                    }));
+                                  }}
+                                  className="bg-white border border-gray-200 rounded-lg text-xs p-1.5 focus:ring-1 focus:ring-blue-500 focus:outline-none min-w-[180px] max-w-[240px]"
+                                >
+                                  <option value="">-- Sem Vínculo --</option>
+                                  {allBackoffices.map(b => (
+                                    <option key={b.email} value={b.email}>
+                                      {b.name} ({b.email})
+                                    </option>
+                                  ))}
+                                </select>
+
+                                <button 
+                                  onClick={async () => {
+                                    setLinkingLoading(true);
+                                    const nextBackoffice = selectedValue || null;
+                                    await linkSellerToBackoffice(seller.email, nextBackoffice);
+                                    setLinkingLoading(false);
+                                  }}
+                                  disabled={linkingLoading}
+                                  className="bg-[#00236f] hover:bg-[#001c56] disabled:bg-gray-200 text-white font-bold text-xs px-3 py-2 rounded-lg transition-all flex items-center gap-1 shadow-sm"
+                                  title="Salvar Vinculação"
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                  <span>Salvar</span>
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </div>
+            );
+          }
+
+          if (isBackoffice) {
+            return (
+              <div className="bg-white border border-gray-150 rounded-[18px] p-4 shadow-sm space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-[#00236f]">
+                      <Users className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-sm text-[#00236f] flex items-center gap-1.5">
+                        Seus Vendedores Vinculados
+                        <span className="text-[10px] font-black bg-blue-100 text-[#00236f] px-2 py-0.5 rounded-full">
+                          {myLinkedSellersList.length}
+                        </span>
+                      </h4>
+                      <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
+                        Designados pelo Gestor • {currentUser?.role}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                      <span className="text-[11px] font-bold text-gray-500">Apenas meus vendedores:</span>
+                      <input 
+                        type="checkbox" 
+                        checked={filterMySellers} 
+                        onChange={(e) => handleToggleFilterMySellers(e.target.checked)}
+                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
+                      />
+                    </label>
+                    
+                    <button 
+                      onClick={() => setShowSellersPanel(!showSellersPanel)}
+                      className="text-xs font-bold text-[#00236f] hover:text-[#001c56] bg-blue-50/70 px-2.5 py-1 rounded-lg hover:bg-blue-100/50 transition-all active:scale-95"
+                    >
+                      {showSellersPanel ? 'Fechar' : 'Ver Vendedores'}
+                    </button>
+                  </div>
+                </div>
+
+                {showSellersPanel && (
+                  <motion.div 
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    className="pt-2 border-t border-gray-100 space-y-3"
+                  >
+                    <div>
+                      <p className="text-[11px] font-extrabold text-gray-400 uppercase tracking-wider mb-1.5">Vendedores sob seus cuidados:</p>
+                      {myLinkedSellersList.length === 0 ? (
+                        <p className="text-xs text-gray-500 bg-gray-50/50 p-2.5 rounded-xl text-center font-medium italic">
+                          Nenhum vendedor vinculado a você pelo Gestor de Backoffice ainda.
+                        </p>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {myLinkedSellersList.map(s => (
+                            <div key={s.email} className="flex items-center justify-between p-2 rounded-xl bg-gray-50 border border-gray-100">
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-bold text-gray-800 truncate">{s.name}</p>
+                                <p className="text-[10px] text-gray-400 truncate">{s.email}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </div>
+            );
+          }
+
+          // Seller / Representante role UI
+          const myBackofficeEmail = allProfiles.find(p => p.email.toLowerCase().trim() === currentUser?.email?.toLowerCase().trim())?.backoffice_email;
+          const backoffice = myBackofficeEmail ? allBackoffices.find(b => b.email.toLowerCase().trim() === myBackofficeEmail.toLowerCase().trim()) : null;
+
+          return (
+            <div className="bg-white border border-gray-150 rounded-[18px] p-4 shadow-sm space-y-2.5">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-600">
+                  <Building className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm text-[#00236f] flex items-center gap-1.5">
+                    Seu Backoffice de Atendimento
+                  </h4>
+                  <p className="text-xs font-semibold text-gray-700 mt-0.5">
+                    {backoffice ? (
+                      <span className="text-emerald-600 flex items-center gap-1">
+                        <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+                        Vinculado a: <strong className="font-bold text-gray-800">{backoffice.name}</strong> ({backoffice.email})
+                      </span>
+                    ) : (
+                      <span className="text-amber-500 font-bold flex items-center gap-1">
+                        ⚠️ Nenhum Backoffice designado pelo Gestor de Backoffice ainda
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </div>
+              <p className="text-[10px] text-gray-400 font-semibold leading-relaxed">
+                * Os seus chamados são automaticamente distribuídos e tratados pelo profissional do Backoffice atribuído a você pelo Gestor de Backoffice.
+              </p>
+            </div>
+          );
+        })()}
 
         {/* Summary Stats: Bento Grid */}
         <section className="grid grid-cols-2 sm:grid-cols-3 gap-3">

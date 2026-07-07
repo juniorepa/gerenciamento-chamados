@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { Mail, Lock, Eye, EyeOff, LogIn, Ticket, User as UserIcon, UserPlus } from 'lucide-react';
-import { motion } from 'motion/react';
+import { Mail, Lock, Eye, EyeOff, LogIn, Ticket, User as UserIcon, UserPlus, QrCode, Smartphone, X, Copy, Check, ExternalLink } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 
 export const LoginScreen: React.FC = () => {
   const { loginWithSupabase, signUpWithSupabase, setScreen } = useApp();
@@ -14,7 +14,17 @@ export const LoginScreen: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
-  const [role, setRole] = useState('Vendedor/Representante');
+  const [showQrModal, setShowQrModal] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyUrl = () => {
+    navigator.clipboard.writeText(window.location.href);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const currentUrl = window.location.href;
+  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(currentUrl)}`;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,10 +42,6 @@ export const LoginScreen: React.FC = () => {
       setError('Por favor, preencha sua senha.');
       return;
     }
-    if (isRegister && password.length < 6) {
-      setError('A senha deve conter no mínimo 6 caracteres.');
-      return;
-    }
 
     setError('');
     setSuccess('');
@@ -43,7 +49,7 @@ export const LoginScreen: React.FC = () => {
 
     if (isRegister) {
       // Supabase Sign Up
-      const { error: signUpErr } = await signUpWithSupabase(cleanEmail, password, name.trim(), role);
+      const { error: signUpErr } = await signUpWithSupabase(cleanEmail, password, name.trim());
       if (signUpErr) {
         setError(signUpErr);
         setLoading(false);
@@ -191,30 +197,6 @@ export const LoginScreen: React.FC = () => {
             </div>
           </div>
 
-          {/* Perfil de Acesso input field (Apenas Cadastro) */}
-          {isRegister && (
-            <div>
-              <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2">
-                Perfil de Acesso
-              </label>
-              <div className="relative">
-                <select
-                  id="role-select"
-                  value={role}
-                  onChange={(e) => setRole(e.target.value)}
-                  className="w-full h-12 px-4 bg-[#f8fafc] border border-gray-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#00236f] focus:border-transparent focus:bg-white transition-all text-gray-800 appearance-none"
-                  required
-                >
-                  <option value="Vendedor/Representante">Vendedor/Representante</option>
-                  <option value="Gestor de Customer">Gestor de Customer</option>
-                </select>
-                <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
-                  ▼
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* Password input field */}
           <div>
             <div className="flex justify-between items-center mb-2">
@@ -284,12 +266,12 @@ export const LoginScreen: React.FC = () => {
               <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
             ) : isRegister ? (
               <>
-                Registrar Agente
+                <span>Registrar Agente</span>
                 <UserPlus className="w-4 h-4" />
               </>
             ) : (
               <>
-                Entrar no Painel
+                <span>Entrar no Painel</span>
                 <LogIn className="w-4 h-4" />
               </>
             )}
@@ -297,10 +279,122 @@ export const LoginScreen: React.FC = () => {
         </form>
       </motion.div>
 
+      {/* Interactive Mobile Testing Trigger */}
+      <div className="flex flex-col items-center gap-3 mt-2 mb-4">
+        <button
+          type="button"
+          onClick={() => setShowQrModal(true)}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-white hover:bg-gray-50 text-xs font-bold text-[#00236f] rounded-full border border-gray-150 shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98]"
+        >
+          <Smartphone className="w-4 h-4 text-emerald-500" />
+          <span>Testar no Celular (Android / iOS)</span>
+          <QrCode className="w-3.5 h-3.5 text-gray-400 ml-1" />
+        </button>
+      </div>
+
       {/* Footer message */}
-      <div className="text-center mt-4 text-xs font-semibold text-gray-500">
+      <div className="text-center text-[10px] font-semibold text-gray-400">
         Desenvolvido com integração em tempo real via Supabase.
       </div>
+
+      {/* QR Code Scan Modal */}
+      <AnimatePresence>
+        {showQrModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/65 backdrop-blur-sm">
+            {/* Modal backdrop closer */}
+            <div className="absolute inset-0" onClick={() => setShowQrModal(false)} />
+            
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              transition={{ duration: 0.25, ease: 'easeOut' }}
+              className="relative w-full max-w-sm p-6 bg-white border border-gray-150 rounded-3xl shadow-2xl z-10 overflow-hidden"
+            >
+              {/* Corner Close button */}
+              <button
+                type="button"
+                onClick={() => setShowQrModal(false)}
+                className="absolute top-4 right-4 p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
+                title="Fechar"
+              >
+                <X className="w-4 h-4" />
+              </button>
+
+              <div className="flex flex-col items-center text-center">
+                <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center mb-3.5 border border-emerald-100 shadow-inner">
+                  <Smartphone className="w-6 h-6 animate-pulse" />
+                </div>
+                
+                <h3 className="text-base font-bold text-gray-900 tracking-tight">
+                  Acessar no Smartphone
+                </h3>
+                <p className="text-xs text-gray-400 mt-1 max-w-[240px] leading-relaxed">
+                  Escaneie o código QR abaixo com a câmera do seu celular para abrir o aplicativo de testes imediatamente.
+                </p>
+
+                {/* QR Code Image Container */}
+                <div className="my-5 p-4 bg-gray-50 rounded-2xl border border-gray-100 shadow-inner relative flex items-center justify-center">
+                  <img
+                    src={qrCodeUrl}
+                    alt="QR Code do Aplicativo"
+                    className="w-48 h-48 rounded-lg select-none mix-blend-multiply"
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+
+                {/* Steps/Instructions */}
+                <div className="w-full text-left bg-[#f8fafc] p-3.5 rounded-xl border border-gray-100 mb-4">
+                  <span className="block text-[10px] font-bold text-[#00236f] uppercase tracking-wider mb-1.5">
+                    Como conectar:
+                  </span>
+                  <ol className="text-[11px] text-gray-500 space-y-1 list-decimal list-inside leading-relaxed font-medium">
+                    <li>Abra o app de câmera do seu Android ou iOS.</li>
+                    <li>Aponte para o código QR acima.</li>
+                    <li>Clique na notificação do link para carregar o sistema.</li>
+                  </ol>
+                </div>
+
+                {/* Alternativa: Copy Link */}
+                <div className="w-full">
+                  <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">
+                    Alternativa: Copiar Link de Teste
+                  </span>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={currentUrl}
+                      className="flex-1 h-9 px-3 bg-gray-50 border border-gray-200 rounded-lg text-[11px] text-gray-500 font-mono focus:outline-none overflow-ellipsis"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleCopyUrl}
+                      className={`h-9 px-3 rounded-lg flex items-center justify-center gap-1.5 text-xs font-bold transition-all ${
+                        copied 
+                          ? 'bg-emerald-500 text-white' 
+                          : 'bg-[#00236f] text-white hover:bg-[#001c5c]'
+                      }`}
+                    >
+                      {copied ? (
+                        <>
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Copiado</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Copiar</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

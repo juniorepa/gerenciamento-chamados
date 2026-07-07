@@ -324,7 +324,7 @@ export const NewTicketScreen: React.FC = () => {
           {/* Cliente Name input (Universal to all tabs) */}
           <div className="group">
             <label htmlFor="customer-name" className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2 ml-1">
-              Nome do Cliente
+              Nome / Razão Social do Cliente
             </label>
             <div className="relative flex items-center">
               <User className="absolute left-3.5 w-5 h-5 text-gray-400" />
@@ -334,7 +334,7 @@ export const NewTicketScreen: React.FC = () => {
                 required
                 value={clientName}
                 onChange={(e) => setClientName(e.target.value)}
-                placeholder="Digite o nome completo"
+                placeholder="Digite o nome ou a razão social completa"
                 className="w-full h-12 pl-11 pr-4 bg-white border border-gray-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#00236f] focus:border-transparent transition-all text-gray-800"
               />
             </div>
@@ -558,24 +558,6 @@ export const NewTicketScreen: React.FC = () => {
           ) : (
             <div className="space-y-5 animate-in fade-in slide-in-from-top-2 duration-200">
               
-              {/* Customer Reason for Remanejamento */}
-              <div className="group">
-                <label htmlFor="customer-reason" className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2 ml-1">
-                  Razão do cliente
-                </label>
-                <div className="relative flex items-center">
-                  <Brain className="absolute left-3.5 w-5 h-5 text-gray-400" />
-                  <input
-                    id="customer-reason"
-                    type="text"
-                    value={customerReason}
-                    onChange={(e) => setCustomerReason(e.target.value)}
-                    placeholder="Qual a justificativa do cliente?"
-                    className="w-full h-12 pl-11 pr-4 bg-white border border-gray-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#00236f] focus:border-transparent transition-all text-gray-800"
-                  />
-                </div>
-              </div>
-
               {/* Number of sales goal target route */}
               <div className="group">
                 <label htmlFor="sales-number" className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2 ml-1">
@@ -636,17 +618,17 @@ export const NewTicketScreen: React.FC = () => {
               {submitSuccess ? (
                 <>
                   <CheckCircle className="w-5 h-5 animate-bounce" />
-                  Enviado com Sucesso!
+                  <span>Enviado com Sucesso!</span>
                 </>
               ) : isSubmitting ? (
                 <>
                   <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  Salvando no ERP...
+                  <span>Salvando no ERP...</span>
                 </>
               ) : (
                 <>
                   <Send className="w-4 h-4" />
-                  Criar Chamado
+                  <span>Criar Chamado</span>
                 </>
               )}
             </button>

@@ -79,6 +79,7 @@ export interface User {
   name: string;
   role: string;
   avatarUrl?: string;
+  backoffice_email?: string; // Link seller to a backoffice email
 }
 
 export type ScreenType = 'login' | 'dashboard' | 'ticket-details' | 'resolve' | 'new-ticket' | 'reset-password';

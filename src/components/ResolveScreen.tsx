@@ -57,6 +57,15 @@ export const ResolveScreen: React.FC = () => {
   const [messageSent, setMessageSent] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  if (!currentUser) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-[#f7f9fb] p-4 text-center">
+        <div className="w-10 h-10 border-4 border-[#00236f] border-t-transparent rounded-full animate-spin mb-4"></div>
+        <p className="text-sm font-bold text-gray-500">Carregando dados da sessão...</p>
+      </div>
+    );
+  }
+
   if (!ticket) {
     return (
       <div className="p-8 text-center bg-gray-50 min-h-screen flex flex-col justify-center items-center">
@@ -109,10 +118,13 @@ export const ResolveScreen: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!feedback.trim()) {
-      alert('Por favor, preencha o Parecer Técnico antes de atualizar o chamado.');
-      return;
-    }
+    
+    // Use a friendly fallback if feedback is left blank, preventing any blocking behavior
+    const finalFeedback = feedback.trim() || (
+      selectedStatus === 'Resolvido' 
+        ? 'Chamado encerrado e resolvido pelo administrador.' 
+        : `Status do chamado atualizado para ${selectedStatus}.`
+    );
 
     if ((selectedStatus === 'Resolvido' || selectedStatus === 'Retorno Solicitado') && !isAdm) {
       alert('Apenas o login ADM tem permissão para este status.');
@@ -135,7 +147,7 @@ export const ResolveScreen: React.FC = () => {
     updateTicketStatus(
       ticket.id, 
       selectedStatus, 
-      feedback, 
+      finalFeedback, 
       isInternalNote, 
       internalNoteText
     );
@@ -356,12 +368,12 @@ export const ResolveScreen: React.FC = () => {
                   {messageSent ? (
                     <>
                       <CheckCircle2 className="w-4 h-4" />
-                      Mensagem Enviada!
+                      <span>Mensagem Enviada!</span>
                     </>
                   ) : (
                     <>
                       <Send className="w-3.5 h-3.5" />
-                      Enviar Mensagem ao Cliente
+                      <span>Enviar Mensagem ao Cliente</span>
                     </>
                   )}
                 </button>
@@ -372,7 +384,7 @@ export const ResolveScreen: React.FC = () => {
           {/* Text Feedback input section */}
           <div>
             <label htmlFor="technical-feedback" className="block text-xs font-bold text-gray-500 mb-2 uppercase tracking-wider">
-              Parecer Técnico / Retorno
+              Parecer Técnico / Retorno <span className="text-gray-400 font-normal lowercase">(opcional)</span>
             </label>
             <div className="relative">
               <FileText className="absolute left-3.5 top-3.5 w-5 h-5 text-gray-400" />
@@ -380,7 +392,7 @@ export const ResolveScreen: React.FC = () => {
                 id="technical-feedback"
                 value={feedback}
                 onChange={(e) => setFeedback(e.target.value)}
-                placeholder="Descreva detalhadamente a solução aplicada ou o motivo da pendência..."
+                placeholder="Descreva detalhadamente a solução aplicada (opcional - se deixado em branco, será preenchido automaticamente com texto padrão de encerramento)..."
                 rows={5}
                 className="w-full bg-white border border-gray-200 rounded-xl pl-11 pr-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#00236f] focus:border-transparent transition-all placeholder:text-gray-400 text-gray-800 resize-none"
               />
@@ -495,7 +507,7 @@ export const ResolveScreen: React.FC = () => {
             className="w-full h-12 bg-[#001f66] hover:bg-[#00164e] text-white rounded-xl flex items-center justify-center gap-2 font-semibold text-sm transition-colors shadow-lg active:scale-[0.98]"
           >
             <Send className="w-4 h-4" />
-            Enviar Retorno e Atualizar
+            <span>Enviar Retorno e Atualizar</span>
           </button>
 
         </form>

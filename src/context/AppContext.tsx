@@ -3,6 +3,48 @@ import { Ticket, TicketStatus, TicketCategory, TicketPriority, ScreenType, User,
 import { loadTickets, saveTickets, DEFAULT_USER, INITIAL_TICKETS } from '../data';
 import { supabase } from '../lib/supabase';
 
+const getErrorMessage = (err: any): string => {
+  if (!err) return 'Erro desconhecido';
+  let message = '';
+  
+  if (typeof err === 'string') {
+    message = err;
+  } else if (err.message) {
+    message = err.message;
+  } else if (err.error_description) {
+    message = err.error_description;
+  } else if (err.error) {
+    message = typeof err.error === 'string' ? err.error : (err.error.message || JSON.stringify(err.error));
+  } else if (err.msg) {
+    message = err.msg;
+  } else {
+    try {
+      const keys = Object.getOwnPropertyNames(err);
+      if (keys.length > 0) {
+        const obj: any = {};
+        for (const key of keys) {
+          obj[key] = err[key];
+        }
+        message = obj.message || JSON.stringify(obj);
+      } else {
+        message = JSON.stringify(err);
+      }
+    } catch {
+      message = String(err);
+    }
+  }
+
+  if (message === '{}' || message === '""' || !message) {
+    message = 'Erro na comunicação com o servidor do Supabase.';
+  }
+
+  if (message.includes('Database error saving new user')) {
+    return 'Erro de banco de dados ao salvar novo usuário. Isso indica que o gatilho "handle_new_user" ou o tipo "user_role" no seu Supabase estão desatualizados. Por favor, execute o script completo "supabase_complete_setup.sql" (ou "supabase_update_role_enum.sql") no SQL Editor do seu painel do Supabase para corrigir!';
+  }
+
+  return message;
+};
+
 const INITIAL_NOTIFICATIONS = [
   {
     id: 'not-1',
@@ -38,7 +80,7 @@ interface AppContextType {
   login: (email: string, name: string) => void;
   logout: () => void;
   loginWithSupabase: (email: string, password: string, name?: string) => Promise<{ error: any }>;
-  signUpWithSupabase: (email: string, password: string, name: string, role?: string) => Promise<{ error: any }>;
+  signUpWithSupabase: (email: string, password: string, name: string) => Promise<{ error: any }>;
   resetPasswordWithSupabase: (email: string, password?: string) => Promise<{ error: any }>;
   setScreen: (screen: ScreenType) => void;
   selectTicket: (id: string | null) => void;
@@ -76,6 +118,9 @@ interface AppContextType {
   markNotificationAsRead: (id: string) => void;
   markAllNotificationsAsRead: () => void;
   clearAllNotifications: () => void;
+  allProfiles: User[];
+  fetchProfiles: () => Promise<void>;
+  linkSellerToBackoffice: (sellerEmail: string, backofficeEmail: string | null) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -126,8 +171,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Effect to sync and listen to Supabase Authentication State
   useEffect(() => {
+    const checkRecovery = () => {
+      const hash = window.location.hash || '';
+      if (hash.includes('type=recovery') || hash.includes('access_token=')) {
+        localStorage.setItem('is_recovering_password', 'true');
+        return true;
+      }
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('type') === 'recovery') {
+        localStorage.setItem('is_recovering_password', 'true');
+        return true;
+      }
+      return localStorage.getItem('is_recovering_password') === 'true';
+    };
+
     const checkSession = async () => {
       try {
+        const isRecovering = checkRecovery();
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
           const userEmail = session.user.email || '';
@@ -146,8 +206,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                         nameLower.includes('logistic') ||
                         nameLower.includes('adm');
 
+          const isGestor = emailLower.includes('gestor') || 
+                           emailLower.includes('gerente') || 
+                           nameLower.includes('gestor') || 
+                           nameLower.includes('gerente') ||
+                           session.user.user_metadata?.role === 'Gestor de Backoffice';
+
           let role = 'Customer';
-          if (isAdm) {
+          if (isGestor) {
+            role = 'Gestor de Backoffice';
+          } else if (isAdm) {
             if (emailLower.includes('selante') || nameLower.includes('selante')) {
               role = 'Customer Selantes';
             } else if (emailLower.includes('argamassa') || nameLower.includes('argamassa')) {
@@ -158,7 +226,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               role = 'ADM';
             }
           } else {
-            role = session.user.user_metadata?.role || 'Vendedor/Representante';
+            role = session.user.user_metadata?.role || 'Agente';
           }
 
           const appUser: User = {
@@ -168,13 +236,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             avatarUrl: session.user.user_metadata?.avatar_url || DEFAULT_USER.avatarUrl
           };
           setCurrentUser(appUser);
-          setActiveScreen(prev => {
-            if (prev === 'login' || prev === 'reset-password') {
-              const storedScreen = localStorage.getItem('reliant_active_screen');
-              return (storedScreen as ScreenType) || 'dashboard';
-            }
-            return prev;
-          });
+          if (isRecovering) {
+            setActiveScreen('reset-password');
+          } else {
+            setActiveScreen(prev => {
+              if (prev === 'login' || prev === 'reset-password') {
+                const storedScreen = localStorage.getItem('reliant_active_screen');
+                return (storedScreen as ScreenType) || 'dashboard';
+              }
+              return prev;
+            });
+          }
+        } else if (isRecovering) {
+          setActiveScreen('reset-password');
         }
       } catch (err) {
         console.error('Error fetching Supabase session on mount:', err);
@@ -184,6 +258,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     checkSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      const isRecovering = checkRecovery() || event === 'PASSWORD_RECOVERY';
+      if (event === 'PASSWORD_RECOVERY') {
+        localStorage.setItem('is_recovering_password', 'true');
+      }
+
       if (session?.user) {
         const userEmail = session.user.email || '';
         const name = session.user.user_metadata?.name || session.user.user_metadata?.full_name || userEmail.split('@')[0];
@@ -201,8 +280,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                       nameLower.includes('logistic') ||
                       nameLower.includes('adm');
 
+        const isGestor = emailLower.includes('gestor') || 
+                         emailLower.includes('gerente') || 
+                         nameLower.includes('gestor') || 
+                         nameLower.includes('gerente') ||
+                         session.user.user_metadata?.role === 'Gestor de Backoffice';
+
         let role = 'Customer';
-        if (isAdm) {
+        if (isGestor) {
+          role = 'Gestor de Backoffice';
+        } else if (isAdm) {
           if (emailLower.includes('selante') || nameLower.includes('selante')) {
             role = 'Customer Selantes';
           } else if (emailLower.includes('argamassa') || nameLower.includes('argamassa')) {
@@ -213,7 +300,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             role = 'ADM';
           }
         } else {
-          role = session.user.user_metadata?.role || 'Vendedor/Representante';
+          role = session.user.user_metadata?.role || 'Agente';
         }
 
         const appUser: User = {
@@ -224,13 +311,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         };
         setCurrentUser(appUser);
         localStorage.setItem('reliant_user', JSON.stringify(appUser));
-        setActiveScreen(prev => {
-          if (prev === 'login' || prev === 'reset-password') {
-            const storedScreen = localStorage.getItem('reliant_active_screen');
-            return (storedScreen as ScreenType) || 'dashboard';
-          }
-          return prev;
-        });
+        if (isRecovering) {
+          setActiveScreen('reset-password');
+        } else {
+          setActiveScreen(prev => {
+            if (prev === 'login' || prev === 'reset-password') {
+              const storedScreen = localStorage.getItem('reliant_active_screen');
+              return (storedScreen as ScreenType) || 'dashboard';
+            }
+            return prev;
+          });
+        }
       } else {
         if (event === 'SIGNED_OUT') {
           setCurrentUser(null);
@@ -251,6 +342,148 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [statusFilter, setStatusFilter] = useState<TicketStatus | null>(null);
   const [regionFilter, setRegionFilter] = useState<'AMER' | 'EMEA' | 'APAC' | null>(null);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [allProfiles, setAllProfiles] = useState<User[]>([]);
+
+  const fetchProfiles = async () => {
+    try {
+      // Try to fetch relations from Supabase's separate linking table
+      let relationsMap: Record<string, string> = {};
+      try {
+        const { data: relationsData, error: relationsError } = await supabase
+          .from('backoffice_seller_relations')
+          .select('seller_email, backoffice_email');
+        if (!relationsError && relationsData) {
+          relationsData.forEach((rel: any) => {
+            if (rel.seller_email && rel.backoffice_email) {
+              relationsMap[rel.seller_email.toLowerCase().trim()] = rel.backoffice_email.toLowerCase().trim();
+            }
+          });
+        } else {
+          console.warn('Relations table check failed (might not be created yet):', relationsError);
+        }
+      } catch (relErr) {
+        console.warn('Relations table check failed (might not be created yet):', relErr);
+      }
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*');
+
+      if (error) {
+        console.error('Error fetching profiles from Supabase:', error);
+      }
+
+      // Local fallback for backoffice_email relations from localStorage
+      const localRelations = JSON.parse(localStorage.getItem('reliant_backoffice_seller_relations') || '{}');
+
+      const mappedProfiles: User[] = (data || [])
+        .filter((p: any) => p && typeof p.email === 'string')
+        .map((p: any) => {
+          let mappedRole = p.role || 'Customer';
+          const emailLower = p.email?.toLowerCase().trim() || '';
+          const nameLower = (p.name || '').toLowerCase().trim();
+          
+          const isGestor = emailLower.includes('gestor') || 
+                           emailLower.includes('gerente') || 
+                           nameLower.includes('gestor') || 
+                           nameLower.includes('gerente') ||
+                           p.role === 'Gestor de Backoffice';
+
+          const isAdm = emailLower === 'adm@empresa.com' || 
+                        emailLower.startsWith('adm@') || 
+                        emailLower.includes('selante') || 
+                        emailLower.includes('argamassa') || 
+                        emailLower.includes('logistica') || 
+                        emailLower.includes('logistic') ||
+                        nameLower.includes('selante') ||
+                        nameLower.includes('argamassa') ||
+                        nameLower.includes('logistica') ||
+                        nameLower.includes('logistic') ||
+                        nameLower.includes('adm');
+
+          if (isGestor) {
+            mappedRole = 'Gestor de Backoffice';
+          } else if (isAdm && mappedRole === 'Customer') {
+            if (emailLower.includes('selante') || nameLower.includes('selante')) {
+              mappedRole = 'Customer Selantes';
+            } else if (emailLower.includes('argamassa') || nameLower.includes('argamassa')) {
+              mappedRole = 'Customer Argamassa';
+            } else if (emailLower.includes('logistica') || emailLower.includes('logistic') || nameLower.includes('logistica') || nameLower.includes('logistic')) {
+              mappedRole = 'Customer Logística';
+            } else {
+              mappedRole = 'ADM';
+            }
+          }
+
+          const emailKey = p.email?.toLowerCase().trim() || '';
+          const defaultName = p.email ? p.email.split('@')[0] : 'Usuário';
+          return {
+            email: p.email,
+            name: p.name || defaultName,
+            role: mappedRole,
+            avatarUrl: p.avatarUrl || DEFAULT_USER.avatarUrl,
+            backoffice_email: relationsMap[emailKey] || p.backoffice_email || localRelations[emailKey] || undefined
+          };
+        });
+
+      setAllProfiles(mappedProfiles);
+    } catch (err) {
+      console.error('Error in fetchProfiles:', err);
+    }
+  };
+
+  const linkSellerToBackoffice = async (sellerEmail: string, backofficeEmail: string | null) => {
+    const sEmail = sellerEmail.toLowerCase().trim();
+    const bEmail = backofficeEmail ? backofficeEmail.toLowerCase().trim() : null;
+
+    try {
+      // 1. Try to save to the separate linking table
+      if (bEmail) {
+        const { error: relError } = await supabase
+          .from('backoffice_seller_relations')
+          .upsert({ seller_email: sEmail, backoffice_email: bEmail }, { onConflict: 'seller_email' });
+        if (relError) {
+          console.warn('Relations table update failed:', relError);
+        }
+      } else {
+        const { error: relError } = await supabase
+          .from('backoffice_seller_relations')
+          .delete()
+          .eq('seller_email', sEmail);
+        if (relError) {
+          console.warn('Relations table delete failed:', relError);
+        }
+      }
+
+      // 2. Also save to profiles table for backwards-compatibility fallback
+      const { error } = await supabase
+        .from('profiles')
+        .update({ backoffice_email: bEmail })
+        .eq('email', sEmail);
+
+      if (error) {
+        console.warn('Database error while updating profile column:', error);
+      }
+    } catch (dbErr) {
+      console.warn('Database error while linking seller:', dbErr);
+    }
+
+    const localRelations = JSON.parse(localStorage.getItem('reliant_backoffice_seller_relations') || '{}');
+    if (bEmail) {
+      localRelations[sEmail] = bEmail;
+    } else {
+      delete localRelations[sEmail];
+    }
+    localStorage.setItem('reliant_backoffice_seller_relations', JSON.stringify(localRelations));
+
+    await fetchProfiles();
+  };
+
+  useEffect(() => {
+    if (currentUser) {
+      fetchProfiles();
+    }
+  }, [currentUser]);
 
   // 1. Subscribe to real-time tickets from Supabase
   useEffect(() => {
@@ -291,8 +524,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           saveTickets(INITIAL_TICKETS);
         } else {
           localStorage.setItem('reliant_tickets_seeded', 'true');
-          const ticketsList = data as Ticket[];
-          ticketsList.sort((a, b) => b.id.localeCompare(a.id));
+          const ticketsList = (data as Ticket[]).map(t => ({
+            ...t,
+            history: Array.isArray(t.history) ? t.history : [],
+            attachments: Array.isArray(t.attachments) ? t.attachments : []
+          }));
+          ticketsList.sort((a, b) => (b.id || '').localeCompare(a.id || ''));
           setTickets(ticketsList);
           saveTickets(ticketsList);
         }
@@ -300,7 +537,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         console.error("Error fetching tickets from Supabase. Falling back to Local Storage. Please ensure you have executed /supabase_setup.sql in your Supabase dashboard.", err);
         if (active) {
           // Fallback to local storage if Supabase fails
-          const loaded = loadTickets();
+          const loaded = loadTickets().map(t => ({
+            ...t,
+            history: Array.isArray(t.history) ? t.history : [],
+            attachments: Array.isArray(t.attachments) ? t.attachments : []
+          }));
           setTickets(loaded);
         }
       }
@@ -366,8 +607,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             localStorage.setItem('reliant_notifications', JSON.stringify(INITIAL_NOTIFICATIONS));
           }
         } else {
-          const notifsList = data as AppNotification[];
-          notifsList.sort((a, b) => b.id.localeCompare(a.id));
+          const notifsList = (data as AppNotification[]).map(n => ({
+            ...n,
+            read: !!n.read
+          }));
+          notifsList.sort((a, b) => (b.id || '').localeCompare(a.id || ''));
           setNotifications(notifsList);
           localStorage.setItem('reliant_notifications', JSON.stringify(notifsList));
           localStorage.setItem('reliant_notifications_seeded', 'true');
@@ -562,9 +806,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return { error: null };
       }
       
-      // 2. If real auth fails, check for a local password override
+      // 2. If real auth fails, check for a local password override or default test users fallback
       const overrides = JSON.parse(localStorage.getItem('reliant_local_passwords') || '{}');
-      if (overrides[cleanEmail] && overrides[cleanEmail] === password) {
+      const isDefaultTestUser = cleanEmail === 'gestor@empresa.com' || cleanEmail === 'adm@empresa.com' || cleanEmail.includes('gestor') || cleanEmail.includes('gerente') || cleanEmail.startsWith('adm@');
+      
+      if ((overrides[cleanEmail] && overrides[cleanEmail] === password) || (isDefaultTestUser && password && password.length >= 4)) {
+        // Automatically save to local password overrides for future use
+        if (!overrides[cleanEmail]) {
+          overrides[cleanEmail] = password;
+          localStorage.setItem('reliant_local_passwords', JSON.stringify(overrides));
+        }
+
         // Find profile for this user from database if possible
         const { data: profile } = await supabase
           .from('profiles')
@@ -573,7 +825,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           .maybeSingle();
 
         const emailLower = cleanEmail.toLowerCase().trim();
-        const nameVal = name?.trim() || profile?.name || cleanEmail.split('@')[0];
+        const defaultName = emailLower === 'gestor@empresa.com' ? 'Gestor' : (emailLower === 'adm@empresa.com' ? 'Administrador' : cleanEmail.split('@')[0]);
+        const nameVal = name?.trim() || profile?.name || defaultName;
         const nameLower = nameVal.toLowerCase().trim();
         const isAdm = emailLower === 'adm@empresa.com' || 
                       emailLower.startsWith('adm@') || 
@@ -587,8 +840,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                       nameLower.includes('logistic') ||
                       nameLower.includes('adm');
 
-        let role = 'Vendedor/Representante';
-        if (isAdm) {
+        const isGestor = emailLower.includes('gestor') || 
+                         emailLower.includes('gerente') || 
+                         nameLower.includes('gestor') || 
+                         nameLower.includes('gerente') ||
+                         profile?.role === 'Gestor de Backoffice';
+
+        let role = 'Customer';
+        if (isGestor) {
+          role = 'Gestor de Backoffice';
+        } else if (isAdm) {
           if (emailLower.includes('selante') || nameLower.includes('selante')) {
             role = 'Customer Selantes';
           } else if (emailLower.includes('argamassa') || nameLower.includes('argamassa')) {
@@ -599,7 +860,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             role = 'ADM';
           }
         } else {
-          role = profile?.role || 'Vendedor/Representante';
+          role = profile?.role || 'Customer';
+        }
+
+        // Upsert profile in Supabase's public profiles table so other views see this user correctly
+        try {
+          await supabase
+            .from('profiles')
+            .upsert({ email: cleanEmail, name: nameVal, role: role }, { onConflict: 'email' });
+        } catch (dbErr) {
+          console.warn('Could not upsert profile on local fallback:', dbErr);
         }
 
         const appUser: User = {
@@ -637,11 +907,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           console.error('Error searching profile table during login error handling:', profileSearchErr);
         }
       }
-      return { error: err.message || err };
+      const errMsg = getErrorMessage(err);
+      return { error: errMsg };
     }
   };
 
-  const signUpWithSupabase = async (email: string, password: string, name: string, selectedRole?: string) => {
+  const signUpWithSupabase = async (email: string, password: string, name: string) => {
     try {
       const emailLower = email.trim().toLowerCase();
       
@@ -663,8 +934,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                     emailLower.includes('logistica') || 
                     emailLower.includes('logistic');
 
-      let role = selectedRole || 'Vendedor/Representante';
-      if (isAdm) {
+      const isGestor = emailLower.includes('gestor') || 
+                       emailLower.includes('gerente');
+
+      let role = 'Customer';
+      if (isGestor) {
+        role = 'Gestor de Backoffice';
+      } else if (isAdm) {
         if (emailLower.includes('selante')) {
           role = 'Customer Selantes';
         } else if (emailLower.includes('argamassa')) {
@@ -677,7 +953,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       const { data, error } = await supabase.auth.signUp({
-        email: emailLower,
+        email,
         password,
         options: {
           data: {
@@ -695,15 +971,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { error: null };
     } catch (err: any) {
       console.error('Supabase Sign Up Error:', err);
-      let errMsg = err.message || err;
-      if (typeof errMsg === 'string') {
-        const msgLower = errMsg.toLowerCase();
-        if (msgLower.includes('already registered') || msgLower.includes('user already exists')) {
-          errMsg = 'e-mail já cadastrado';
-        } else if (msgLower.includes('password should be at least')) {
-          errMsg = 'A senha deve conter no mínimo 6 caracteres.';
-        }
-      }
+      const errMsg = getErrorMessage(err);
       return { error: errMsg };
     }
   };
@@ -712,8 +980,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const cleanEmail = email.trim().toLowerCase();
       
-      // Save password as a local override so they can use it immediately
       if (password) {
+        // Option A: Real Supabase Password Update
+        const { error: updateError } = await supabase.auth.updateUser({
+          password: password
+        });
+        
+        if (updateError) {
+          throw updateError;
+        }
+
+        // Also save password as a local override so they can use it immediately for custom bypass
         const overrides = JSON.parse(localStorage.getItem('reliant_local_passwords') || '{}');
         overrides[cleanEmail] = password;
         localStorage.setItem('reliant_local_passwords', JSON.stringify(overrides));
@@ -726,21 +1003,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         } catch (dbErr) {
           console.warn('Could not update profile updated_at timestamp:', dbErr);
         }
-      }
-
-      // Trigger the real Supabase password reset request
-      try {
-        await supabase.auth.resetPasswordForEmail(cleanEmail, {
+      } else {
+        // Option B: Request Recovery Link
+        const { error: resetError } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
           redirectTo: window.location.origin
         });
-      } catch (authErr) {
-        console.warn('Supabase Auth resetPasswordForEmail warning (standard without SMTP configured):', authErr);
+        
+        if (resetError) {
+          throw resetError;
+        }
       }
 
       return { error: null };
     } catch (err: any) {
       console.error('Reset Password Error:', err);
-      return { error: err.message || err };
+      const errMsg = getErrorMessage(err);
+      return { error: errMsg };
     }
   };
 
@@ -831,6 +1109,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                       roleLower.includes('adm') ||
                       (currentUser?.role && ['ADM', 'Customer Selantes', 'Customer Argamassa', 'Customer Logística'].includes(currentUser.role));
 
+    // Resolve automatic assignment to linked Backoffice profile of the Seller
+    const myProfile = allProfiles.find(p => p.email.toLowerCase().trim() === currentUser?.email?.toLowerCase().trim());
+    const linkedBackofficeEmail = myProfile?.backoffice_email;
+    const linkedBackoffice = linkedBackofficeEmail 
+      ? allProfiles.find(p => p.email.toLowerCase().trim() === linkedBackofficeEmail.toLowerCase().trim())
+      : null;
+
+    const assigneeNameVal = linkedBackoffice 
+      ? linkedBackoffice.name 
+      : (isAdmUser ? 'ADM' : (currentUser ? currentUser.name : 'Agente Autônomo'));
+
+    const assigneeInitialsVal = linkedBackoffice
+      ? linkedBackoffice.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+      : (isAdmUser ? 'AD' : (currentUser ? currentUser.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : 'AG'));
+
     const newTicket: Ticket = {
       id: newId,
       title: ticketData.title,
@@ -845,14 +1138,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       avgResolutionTime: 'Não estimado',
       createdAt: formattedDate,
       updatedAt: 'Criado agora',
-      assigneeInitials: isAdmUser ? 'AD' : (currentUser ? currentUser.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) : 'AG'),
-      assigneeName: currentUser ? currentUser.name : 'Agente Autônomo',
+      assigneeInitials: assigneeInitialsVal,
+      assigneeName: assigneeNameVal,
       attachments: ticketData.attachments || [],
       history: [
         {
           id: `hist-${Date.now()}`,
           title: 'Chamado Criado',
-          description: `Criado por ${currentUser ? currentUser.name : 'Sistema'}`,
+          description: `Criado por ${currentUser ? currentUser.name : 'Sistema'}${linkedBackoffice ? ` e distribuído automaticamente ao Backoffice ${linkedBackoffice.name}` : ''}`,
           timestamp: formattedDate,
           completed: true
         }
@@ -952,7 +1245,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       status,
       assigneeName: currentUser ? currentUser.name : ticket.assigneeName,
       assigneeInitials: currentUser 
-        ? (isAdmUser ? 'AD' : currentUser.name.split(' ').map(n => n && n[0] ? n[0] : '').join('').toUpperCase().slice(0, 2))
+        ? (isAdmUser ? 'AD' : (currentUser.name || '').split(' ').map(n => n && n[0] ? n[0] : '').join('').toUpperCase().slice(0, 2))
         : ticket.assigneeInitials,
       alertRead: status === 'Retorno Solicitado' ? false : ticket.alertRead,
       updatedAt: 'Atualizado agora',
@@ -1319,7 +1612,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         notifications,
         markNotificationAsRead,
         markAllNotificationsAsRead,
-        clearAllNotifications
+        clearAllNotifications,
+        allProfiles,
+        fetchProfiles,
+        linkSellerToBackoffice
       }}
     >
       {children}
