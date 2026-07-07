@@ -939,6 +939,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
         throw error;
       }
+
+      // If no session was returned, attempt to sign in immediately using the credentials.
+      let session = data.session;
+      if (!session) {
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password
+        });
+        if (signInError) {
+          if (signInError.message && signInError.message.toLowerCase().includes('confirm')) {
+            return { error: 'Conta criada! Confirme seu e-mail para acessar o sistema.' };
+          }
+          throw signInError;
+        }
+        session = signInData.session;
+      }
+
+      // If we have a session, update activeScreen and currentUser
+      if (session?.user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('email', emailLower)
+          .maybeSingle();
+
+        const userRole = profile?.role || role;
+
+        const appUser: User = {
+          email: emailLower,
+          name: name,
+          role: userRole,
+          avatarUrl: DEFAULT_USER.avatarUrl
+        };
+        setCurrentUser(appUser);
+        localStorage.setItem('reliant_user', JSON.stringify(appUser));
+        setActiveScreen('dashboard');
+      }
+
       return { error: null };
     } catch (err: any) {
       console.error('Supabase Sign Up Error:', err);

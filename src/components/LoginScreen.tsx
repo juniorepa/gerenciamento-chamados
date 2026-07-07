@@ -51,11 +51,15 @@ export const LoginScreen: React.FC = () => {
       // Supabase Sign Up
       const { error: signUpErr } = await signUpWithSupabase(cleanEmail, password, name.trim());
       if (signUpErr) {
-        setError(signUpErr);
+        if (signUpErr.includes('Conta criada!')) {
+          setSuccess(signUpErr);
+          setIsRegister(false);
+        } else {
+          setError(signUpErr);
+        }
         setLoading(false);
       } else {
-        setSuccess('Sua conta foi criada com sucesso! Faça login abaixo para entrar.');
-        setIsRegister(false);
+        // Auto-login succeeded, activeScreen will change to dashboard.
         setLoading(false);
       }
     } else {
